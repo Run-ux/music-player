@@ -1,0 +1,334 @@
+mod player_fixed;
+mod player_thread;
+
+use player_fixed::{PlayMode, PlayerCommand, PlayerEvent, PlayerState, SongInfo};
+use player_thread::AudioPlayer;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
+use tokio::sync::mpsc;
+use tokio::sync::Mutex as AsyncMutex;
+
+/// 状态管理器
+struct MusicPlayerState {
+    player: Arc<AudioPlayer>,
+    event_receiver: mpsc::Receiver<PlayerEvent>,
+}
+
+/// Tauri 状态
+#[derive(Default)]
+struct AppState {
+    player: Option<Arc<AsyncMutex<MusicPlayerState>>>,
+}
+
+// 初始化播放器
+/// 初始化播放器
+#[tauri::command]
+async fn init_player(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    // 获取状态锁
+    let mut app_state = state.lock().await;
+    
+    // 如果播放器已经初始化，则不重复初始化
+    if app_state.player.is_some() {
+        return Ok(());
+    }
+
+    // 创建事件通道
+    let (event_tx, event_rx) = mpsc::channel::<PlayerEvent>(100);
+    
+    // 创建AudioPlayer实例
+    let audio_player = AudioPlayer::new(event_tx.clone())
+        .ok_or_else(|| "无法创建音频播放器".to_string())?;
+    
+    let player_state = MusicPlayerState {
+        player: Arc::new(audio_player),
+        event_receiver: event_rx,
+    };
+
+    let player_state = Arc::new(AsyncMutex::new(player_state));
+
+    // 存储状态
+    app_state.player = Some(player_state.clone());
+
+    // 启动事件监听器
+    let app_handle_clone = app_handle.clone();
+    tokio::spawn(async move {
+        let mut player_state_guard = player_state.lock().await;
+        while let Some(event) = player_state_guard.event_receiver.recv().await {
+            match &event {
+                PlayerEvent::Error(err) => println!("播放器错误: {}", err),
+                _ => {}
+            }            // 将事件发送到前端 (Tauri 2.0 使用 emit 替代 emit_all)
+            let _ = app_handle_clone.emit("player-event", event.clone());
+        }
+    });
+
+    Ok(())
+}
+
+// 获取播放器状态
+/// 获取播放器状态
+#[tauri::command]
+async fn get_player_state(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<PlayerState, String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    Ok(player_state_guard.player.get_state())
+}
+
+// 获取播放列表
+/// 获取播放列表
+#[tauri::command]
+async fn get_playlist(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<Vec<SongInfo>, String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    Ok(player_state_guard.player.get_playlist())
+}
+
+// 获取当前播放索引
+/// 获取当前播放索引
+#[tauri::command]
+async fn get_current_index(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<Option<usize>, String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    Ok(player_state_guard.player.get_current_index())
+}
+
+// 获取播放模式
+/// 获取播放模式
+#[tauri::command]
+async fn get_play_mode(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<PlayMode, String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    Ok(player_state_guard.player.get_play_mode())
+}
+
+// 播放
+/// 播放
+#[tauri::command]
+async fn play(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::Play)
+}
+
+// 暂停
+/// 暂停
+#[tauri::command]
+async fn pause(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::Pause)
+}
+
+// 停止
+/// 停止
+#[tauri::command]
+async fn stop(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::Stop)
+}
+
+// 下一曲
+/// 下一曲
+#[tauri::command]
+async fn next(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::Next)
+}
+
+// 上一曲
+/// 上一曲
+#[tauri::command]
+async fn previous(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::Previous)
+}
+
+// 设置当前歌曲
+/// 设置当前歌曲
+#[tauri::command]
+async fn set_song(
+    index: usize,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::SetSong(index))
+}
+
+// 添加歌曲
+/// 添加歌曲
+#[tauri::command]
+async fn add_song(
+    path: String,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::AddSong(PathBuf::from(path)))
+}
+
+// 移除歌曲
+/// 移除歌曲
+#[tauri::command]
+async fn remove_song(
+    index: usize,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::RemoveSong(index))
+}
+
+// 清空播放列表
+/// 清空播放列表
+#[tauri::command]
+async fn clear_playlist(state: tauri::State<'_, AsyncMutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::ClearPlaylist)
+}
+
+// 设置播放模式
+/// 设置播放模式
+#[tauri::command]
+async fn set_play_mode(
+    mode: PlayMode,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    let app_state = state.lock().await;
+    let player_state = app_state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard.player.handle_command(PlayerCommand::SetPlayMode(mode))
+}
+
+// 打开文件对话框添加歌曲
+/// 打开文件对话框添加歌曲
+#[tauri::command]
+async fn open_audio_file(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AsyncMutex<AppState>>,
+) -> Result<(), String> {
+    use tauri_plugin_dialog::DialogExt;
+    
+    // 在 Tauri 2.0 中，pick_files 现在需要一个回调函数
+    app_handle.dialog()
+        .file()
+        .add_filter("音频文件", &["mp3", "flac", "wav", "ogg", "m4a", "aac"])
+        .pick_files(move |file_paths| {
+            if let Some(paths) = file_paths {
+                // 在新线程中处理文件，因为回调不是异步的
+                for path in paths {
+                    // 将FilePath转换为Path
+                    let path_str = path.to_string();
+                    let path_buf = std::path::PathBuf::from(path_str);
+                    
+                    // 使用同步方式添加歌曲
+                    tauri::async_runtime::spawn({
+                        let state = state.clone();
+                        async move {
+                            let app_state = state.lock().await;
+                            if let Some(player_state) = &app_state.player {
+                                if let Ok(player_guard) = player_state.lock().await {
+                                    let _ = player_guard.player.handle_command(
+                                        PlayerCommand::AddSong(path_buf)
+                                    );
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    
+    Ok(())
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(AsyncMutex::new(AppState::default()))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            init_player,
+            get_player_state,
+            get_playlist,
+            get_current_index,
+            get_play_mode,
+            play,
+            pause,
+            stop,
+            next,
+            previous,
+            set_song,
+            add_song,
+            remove_song,
+            clear_playlist,
+            set_play_mode,
+            open_audio_file,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
