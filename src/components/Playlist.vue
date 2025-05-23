@@ -30,7 +30,7 @@ const handleRemoveSong = (event: Event, index: number) => {
 
 // 打开添加歌曲对话框
 const handleAddSongs = async () => {
-  await invoke('open_audio_file');
+  await invoke('open_audio_files');
 };
 
 // 清空播放列表

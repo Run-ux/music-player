@@ -11,8 +11,7 @@ import NowPlaying from "./components/NowPlaying.vue";
 const playerStore = usePlayerStore();
 
 // 初始化播放器
-const initPlayer = async () => {
-  try {
+const initPlayer = async () => {  try {
     await invoke('init_player');
       // 获取播放列表
     const playlist = await invoke('get_playlist') as SongInfo[];
@@ -27,6 +26,13 @@ const initPlayer = async () => {
     // 获取播放器状态
     const state = await invoke('get_player_state');
     playerStore.updateState(state as PlayerState);
+    
+    // 监听歌曲添加事件
+    await listen('songs_added', async () => {
+      console.log('Songs added, refreshing playlist');
+      const updatedPlaylist = await invoke('get_playlist') as SongInfo[];
+      playerStore.updatePlaylist(updatedPlaylist);
+    });
     
     // 监听播放器事件
     await listen('player-event', (event: any) => {

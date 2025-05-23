@@ -8,8 +8,7 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
-  },
-  "app": {
+  },  "app": {
     "windows": [
       {
         "title": "tauri-app",

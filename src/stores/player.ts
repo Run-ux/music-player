@@ -95,9 +95,10 @@ export const usePlayerStore = defineStore('player', () => {
     await invoke('set_play_mode', { mode });
     playMode.value = mode;
   };
-  
   const openAudioFile = async () => {
-    await invoke('open_audio_file');
+    console.log("Calling open_audio_files command...");
+    await invoke('open_audio_files');
+    console.log("open_audio_files command completed");
   };
   
   const updateProgress = (pos: number, dur: number) => {

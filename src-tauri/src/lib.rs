@@ -308,92 +308,124 @@ async fn set_play_mode(
         .map_err(|e| e.to_string())
 }
 
-/// 打开文件对话框添加歌曲
+/// 打开文件对话框添加歌曲 - 完全重写版本
 #[tauri::command]
 async fn open_audio_files<R: Runtime>(
     app_handle: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("Attempting to open audio files...");
-    // 先检查player是否初始化
+    println!("Attempting to open audio files... (DEBUG LOG)");
+    
+    // 检查播放器状态
+    println!("检查播放器状态：{:?}", state.player.is_some());
+    
+    // 如果播放器未初始化，尝试先初始化
+    if state.player.is_none() {
+        println!("播放器未初始化，尝试初始化...");
+        // 创建AudioPlayer实例（SafePlayerManager）和事件接收器
+        let (audio_player, event_rx) = AudioPlayer::new();
+
+        let player_state = MusicPlayerState {
+            player: Arc::new(audio_player),
+            event_receiver: event_rx,
+        };
+
+        let player_state = Arc::new(AsyncMutex::new(player_state));
+        
+        // 创建一个新的AppState实例并使用manage替换原有的实例
+        let mut app_state = AppState::default();
+        app_state.player = Some(player_state.clone());
+        app_handle.manage::<AppState>(app_state);
+        
+        println!("播放器初始化完成");
+        
+        // 获取新的状态
+        let state = app_handle.state::<AppState>();
+        println!("新的状态已获取，播放器是否存在：{:?}", state.player.is_some());
+    }
+    
+    // 再次尝试获取播放器状态
     let player_state = state
         .player
         .as_ref()
-        .ok_or_else(|| "播放器未初始化".to_string())?
+        .ok_or_else(|| "播放器仍然未初始化".to_string())?
         .clone();
     
-    // 使用blocking_fn避免回调问题
-    // 同步阻塞方式选择文件，而不是使用pick_files()回调方法
-    use std::sync::mpsc::channel;
-    let (tx, rx) = channel();
-    
-    app_handle
-        .dialog()
-        .file()
-        .add_filter("Audio", &["mp3", "wav", "ogg", "flac"])
-        .set_title("Select Audio Files")
-        .pick_files(move |f| tx.send(f).unwrap());
-    
-    // 等待选择结果
-    let files_opt = rx.recv().map_err(|e| e.to_string())?;
-    
-    match files_opt {
-        Some(files) => {
-            if !files.is_empty() {
-                println!("Files picked: {:?}", files);
-                let mut songs_to_add = Vec::new();                // 处理选择的文件
-                for file_path in files {
-                    // 使用file_path.to_string()然后转换为PathBuf
-                    let path_string = file_path.to_string();
-                    let actual_path = PathBuf::from(path_string);
-                    println!("Processing file: {:?}", actual_path);
-                    match SongInfo::from_path(&actual_path) {
-                        Ok(song_info) => {
-                            songs_to_add.push(song_info);
-                        }
-                        Err(e) => {
-                            eprintln!("Error processing song from path {:?}: {}", actual_path, e);
-                            let _ = app_handle.emit_to(
-                                "main",
-                                "player_error",
-                                &format!("Failed to load song {}: {}", actual_path.display(), e),
-                            );
+    println!("播放器已初始化");
+
+    // 在单独的线程中启动文件选择
+    let app_handle_clone = app_handle.clone();
+    let player_state_clone = player_state.clone();    // 启动单独的线程，因为文件对话框会阻塞当前线程
+    std::thread::spawn(move || {
+        println!("Starting file dialog in separate thread... (DEBUG LOG)");
+        // 使用同步API选择文件，使用回调函数接收结果
+        app_handle_clone
+            .dialog()
+            .file()
+            .add_filter("Audio", &["mp3", "wav", "ogg", "flac"])
+            .pick_files(move |file_paths| {
+                if let Some(paths) = file_paths {
+                    if paths.is_empty() {
+                        println!("No files selected.");
+                        return;
+                    }
+                    
+                    println!("Selected {} files", paths.len());
+                    let mut songs_to_add = Vec::new();
+                    
+                    for path in paths {
+                        let path_str = path.to_string();
+                        println!("Processing file: {}", path_str);
+                        
+                        // 创建标准路径
+                        let path_buf = PathBuf::from(path_str);
+                        
+                        // 尝试加载歌曲信息
+                        match SongInfo::from_path(&path_buf) {
+                            Ok(song_info) => {
+                                songs_to_add.push(song_info);
+                            }
+                            Err(e) => {
+                                eprintln!("Error processing song: {}", e);
+                            }
                         }
                     }
+                    
+                    // 如果有歌曲要添加
+                    if !songs_to_add.is_empty() {
+                        // 在当前线程中使用block_on处理异步操作
+                        tauri::async_runtime::block_on(async {
+                            let player_state_guard = player_state_clone.lock().await;
+                            match player_state_guard
+                                .player
+                                .send_command(PlayerCommand::AddSongs(songs_to_add))
+                                .await
+                            {
+                                Ok(_) => {
+                                    println!("Songs added successfully!");
+                                    // 发送事件通知前端
+                                    let _ = app_handle_clone.emit_to("main", "songs_added", ());
+                                }
+                                Err(e) => {
+                                    eprintln!("Error adding songs: {}", e);
+                                    let _ = app_handle_clone.emit_to(
+                                        "main", 
+                                        "player_error",
+                                        format!("Failed to add songs: {}", e)
+                                    );
+                                }
+                            }
+                        });
+                    } else {
+                        println!("No valid audio files were selected.");
+                    }
+                } else {
+                    println!("Dialog was cancelled.");
                 }
-                
-                // 如果有歌曲添加到列表，发送命令
-                if !songs_to_add.is_empty() {
-                    // 使用tokio::spawn避免在UI线程中阻塞
-                    let app_handle_clone = app_handle.clone();
-                    tokio::spawn(async move {
-                        let player_state_guard = player_state.lock().await;
-                        if let Err(e) = player_state_guard
-                            .player
-                            .send_command(PlayerCommand::AddSongs(songs_to_add))
-                            .await
-                        {
-                            eprintln!("Error sending AddSongs command: {:?}", e);
-                            let _ = app_handle_clone.emit_to(
-                                "main",
-                                "player_error",
-                                &format!("Failed to add songs: {}", e),
-                            );
-                        } else {
-                            println!("AddSongs command sent successfully.");
-                            let _ = app_handle_clone.emit_to("main", "songs_added", &());
-                        }
-                    });
-                }
-            } else {
-                println!("No files selected.");
-            }
-        }
-        None => {
-            println!("File dialog was cancelled.");
-        }
-    }
-
+            });
+    });
+    
+    // 立即返回，不等待文件选择
     Ok(())
 }
 
