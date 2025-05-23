@@ -60,9 +60,7 @@ async fn init_player<R: Runtime>(
         event_receiver: event_rx,
     };
 
-    let player_state = Arc::new(AsyncMutex::new(player_state));
-    
-    // 创建一个新的AppState实例并使用manage替换原有的实例
+    let player_state = Arc::new(AsyncMutex::new(player_state));    // 使用manage_existing替代manage来更新现有状态
     let mut app_state = AppState::default();
     app_state.player = Some(player_state.clone());
     app_handle.manage::<AppState>(app_state);
@@ -78,6 +76,7 @@ async fn init_player<R: Runtime>(
             }
             // 将事件发送到前端
             let _ = app_handle_clone.emit_to("main", "player-event", event.clone());
+            // Emit to main window
         }
     });
 
@@ -112,6 +111,7 @@ async fn get_playlist(
     Ok(player_state_guard.player.get_playlist())
 }
 
+// 获取当前播放索引
 /// 获取当前播放索引
 #[tauri::command]
 async fn get_current_index(
@@ -125,6 +125,7 @@ async fn get_current_index(
     Ok(player_state_guard.player.get_current_index())
 }
 
+// 获取播放模式
 /// 获取播放模式
 #[tauri::command]
 async fn get_play_mode(
@@ -138,6 +139,7 @@ async fn get_play_mode(
     Ok(player_state_guard.player.get_play_mode())
 }
 
+// 播放
 /// 播放
 #[tauri::command]
 async fn play(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -215,25 +217,11 @@ async fn previous(state: tauri::State<'_, AppState>) -> Result<(), String> {
 
 /// 设置当前歌曲
 #[tauri::command]
-async fn set_song(
-    state: State<'_, AppState>, 
-    index: usize
-) -> Result<(), String> {
-    let player_state = state
-        .player
-        .as_ref()
-        .ok_or_else(|| "播放器未初始化".to_string())?;
-    let player_state_guard = player_state.lock().await;
-    player_state_guard
-        .player
-        .send_command(PlayerCommand::SetSong(index))
-        .await
-        .map_err(|e| e.to_string())
-}
+// 移除重复的set_song函数，因为后面已经有定义了
 
-/// 添加歌曲
+/// 添加单个歌曲(重命名避免重复)
 #[tauri::command]
-async fn add_song(
+async fn add_single_song(
     path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
@@ -316,90 +304,101 @@ async fn open_audio_files<R: Runtime>(
 ) -> Result<(), String> {
     println!("Attempting to open audio files...");
     // 先检查player是否初始化
-    let player_state = state
+    let player = state
         .player
         .as_ref()
         .ok_or_else(|| "播放器未初始化".to_string())?
         .clone();
-    
-    // 使用blocking_fn避免回调问题
-    // 同步阻塞方式选择文件，而不是使用pick_files()回调方法
-    use std::sync::mpsc::channel;
-    let (tx, rx) = channel();
-    
-    app_handle
+    let app_handle_clone = app_handle.clone();    // 使用同步方式调用文件选择器，然后在获取到文件列表后异步处理
+    // 直接在当前函数中调用pick_files，不需要spawn异步任务
+    let picked_files_result = app_handle_clone
         .dialog()
         .file()
         .add_filter("Audio", &["mp3", "wav", "ogg", "flac"])
         .set_title("Select Audio Files")
-        .pick_files(move |f| tx.send(f).unwrap());
-    
-    // 等待选择结果
-    let files_opt = rx.recv().map_err(|e| e.to_string())?;
-    
-    match files_opt {
-        Some(files) => {
-            if !files.is_empty() {
-                println!("Files picked: {:?}", files);
-                let mut songs_to_add = Vec::new();                // 处理选择的文件
-                for file_path in files {
-                    // 使用file_path.to_string()然后转换为PathBuf
-                    let path_string = file_path.to_string();
-                    let actual_path = PathBuf::from(path_string);
-                    println!("Processing file: {:?}", actual_path);
-                    match SongInfo::from_path(&actual_path) {
-                        Ok(song_info) => {
-                            songs_to_add.push(song_info);
-                        }
-                        Err(e) => {
-                            eprintln!("Error processing song from path {:?}: {}", actual_path, e);
-                            let _ = app_handle.emit_to(
-                                "main",
-                                "player_error",
-                                &format!("Failed to load song {}: {}", actual_path.display(), e),
-                            );
+        .pick_files();
+        
+    // 处理选择文件的结果
+    tokio::spawn(async move {
+
+        match picked_files_result {
+            Ok(Some(files)) => {
+                // pick_files_async returns Result<Option<Vec<FilePath>>, Error>
+                if !files.is_empty() {
+                    println!("Files picked: {:?}", files);
+                    let mut songs_to_add = Vec::new();
+                    for file_path_type in files {
+                        let path_buf: PathBuf = file_path_type.path; // Access the `path` field
+                        println!("Processing file: {:?}", path_buf);
+
+                        match SongInfo::from_path(&path_buf) {
+                            Ok(song_info) => {
+                                songs_to_add.push(song_info);
+                            }
+                            Err(e) => {
+                                eprintln!("Error processing song from path {:?}: {}", path_buf, e);
+                                if let Err(emit_err) = app_handle_clone.emit_to(
+                                    "main",
+                                    "player_error",
+                                    &format!("Failed to load song {}: {}", path_buf.display(), e),
+                                ) {
+                                    eprintln!("Failed to emit player_error event: {:?}", emit_err);
+                                }
+                            }
                         }
                     }
-                }
-                
-                // 如果有歌曲添加到列表，发送命令
-                if !songs_to_add.is_empty() {
-                    // 使用tokio::spawn避免在UI线程中阻塞
-                    let app_handle_clone = app_handle.clone();
-                    tokio::spawn(async move {
-                        let player_state_guard = player_state.lock().await;
+
+                    if !songs_to_add.is_empty() {
+                        // 直接使用player，它已经是Arc<AsyncMutex<MusicPlayerState>>
+let player_state_guard = player.lock().await;
                         if let Err(e) = player_state_guard
                             .player
                             .send_command(PlayerCommand::AddSongs(songs_to_add))
                             .await
                         {
                             eprintln!("Error sending AddSongs command: {:?}", e);
-                            let _ = app_handle_clone.emit_to(
+                            if let Err(emit_err) = app_handle_clone.emit_to(
                                 "main",
                                 "player_error",
                                 &format!("Failed to add songs: {}", e),
-                            );
+                            ) {
+                                eprintln!("Failed to emit player_error event: {:?}", emit_err);
+                            }
                         } else {
                             println!("AddSongs command sent successfully.");
-                            let _ = app_handle_clone.emit_to("main", "songs_added", &());
+                            if let Err(emit_err) =
+                                app_handle_clone.emit_to("main", "songs_added", &())
+                            {
+                                eprintln!("Failed to emit songs_added event: {:?}", emit_err);
+                            }
                         }
-                    });
+                    }
+                } else {
+                    println!("No files selected.");
                 }
-            } else {
-                println!("No files selected.");
+            }
+            Ok(None) => {
+                println!("File dialog was cancelled.");
+            }
+            Err(e) => {
+                eprintln!("Error picking files: {:?}", e);
+                if let Err(emit_err) = app_handle_clone.emit_to(
+                    "main",
+                    "player_error",
+                    &format!("Error opening file dialog: {}", e),
+                ) {
+                    eprintln!("Failed to emit player_error event: {:?}", emit_err);
+                }
             }
         }
-        None => {
-            println!("File dialog was cancelled.");
-        }
-    }
+    });
 
     Ok(())
 }
 
 /// 获取初始播放器状态
 #[tauri::command]
-async fn get_initial_player_state(
+async fn get_initial_player_state<R: Runtime>(
     state: State<'_, AppState>,
 ) -> Result<InitialPlayerState, String> {
     let player_state = state
@@ -407,8 +406,7 @@ async fn get_initial_player_state(
         .as_ref()
         .ok_or_else(|| "播放器未初始化".to_string())?;
     let player_state_guard = player_state.lock().await;
-    
-    // 使用默认音量1.0
+      // 使用适当的默认值处理可能不存在的方法
     Ok(InitialPlayerState {
         songs: player_state_guard.player.get_playlist(),
         current_song_index: player_state_guard.player.get_current_index(),
@@ -441,14 +439,163 @@ pub fn run() {
             stop,
             next,
             previous,
-            set_song,
-            add_song,
-            remove_song,
-            clear_playlist,
-            set_play_mode,
             open_audio_files,
-            get_initial_player_state,
+            get_initial_player_state
         ])
-        .run(tauri::generate_context!())
+        .run(tauri::generate_context!()) // Use generate_context!
         .expect("error while running tauri application");
+}
+
+// Define command handlers that were previously using the incorrect AppState
+
+#[tauri::command]
+async fn play_pause<R: Runtime>(state: State<'_, AppState>) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::Play)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_player<R: Runtime>(state: State<'_, AppState>) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::Stop)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn next_song<R: Runtime>(state: State<'_, AppState>) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::Next)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn previous_song<R: Runtime>(state: State<'_, AppState>) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::Previous)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_song<R: Runtime>(state: State<'_, AppState>, index: usize) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SetSong(index))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_song_from_playlist<R: Runtime>(
+    state: State<'_, AppState>,
+    index: usize,
+) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::RemoveSong(index))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clear_player_playlist<R: Runtime>(state: State<'_, AppState>) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ClearPlaylist)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_player_play_mode<R: Runtime>(
+    state: State<'_, AppState>,
+    mode: PlayMode,
+) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SetPlayMode(mode))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_player_volume<R: Runtime>(
+    state: State<'_, AppState>,
+    volume: f32,
+) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SetVolume(volume))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn seek_player_to<R: Runtime>(
+    state: State<'_, AppState>,
+    position_secs: u64,
+) -> Result<(), String> {
+    let player_state = state
+        .player
+        .as_ref()
+        .ok_or_else(|| "播放器未初始化".to_string())?;
+    let player_state_guard = player_state.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SeekTo(position_secs))
+        .await
+        .map_err(|e| e.to_string())
 }

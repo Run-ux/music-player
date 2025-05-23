@@ -341,22 +341,23 @@ async fn open_audio_files<R: Runtime>(
         Some(files) => {
             if !files.is_empty() {
                 println!("Files picked: {:?}", files);
-                let mut songs_to_add = Vec::new();                // 处理选择的文件
-                for file_path in files {
-                    // 使用file_path.to_string()然后转换为PathBuf
-                    let path_string = file_path.to_string();
-                    let actual_path = PathBuf::from(path_string);
-                    println!("Processing file: {:?}", actual_path);
-                    match SongInfo::from_path(&actual_path) {
+                let mut songs_to_add = Vec::new();
+                
+                // 处理选择的文件
+                for file_path_type in files {
+                    let path_buf: PathBuf = file_path_type.path;
+                    println!("Processing file: {:?}", path_buf);
+                    
+                    match SongInfo::from_path(&path_buf) {
                         Ok(song_info) => {
                             songs_to_add.push(song_info);
                         }
                         Err(e) => {
-                            eprintln!("Error processing song from path {:?}: {}", actual_path, e);
+                            eprintln!("Error processing song from path {:?}: {}", path_buf, e);
                             let _ = app_handle.emit_to(
                                 "main",
                                 "player_error",
-                                &format!("Failed to load song {}: {}", actual_path.display(), e),
+                                &format!("Failed to load song {}: {}", path_buf.display(), e),
                             );
                         }
                     }

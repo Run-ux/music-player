@@ -322,42 +322,36 @@ async fn open_audio_files<R: Runtime>(
         .ok_or_else(|| "播放器未初始化".to_string())?
         .clone();
     
-    // 使用blocking_fn避免回调问题
-    // 同步阻塞方式选择文件，而不是使用pick_files()回调方法
-    use std::sync::mpsc::channel;
-    let (tx, rx) = channel();
-    
-    app_handle
+    // 使用同步方法选择文件
+    let picked_files_result = app_handle
         .dialog()
         .file()
         .add_filter("Audio", &["mp3", "wav", "ogg", "flac"])
         .set_title("Select Audio Files")
-        .pick_files(move |f| tx.send(f).unwrap());
+        .pick_files();
     
-    // 等待选择结果
-    let files_opt = rx.recv().map_err(|e| e.to_string())?;
-    
-    match files_opt {
-        Some(files) => {
+    match picked_files_result {
+        Ok(Some(files)) => {
             if !files.is_empty() {
                 println!("Files picked: {:?}", files);
-                let mut songs_to_add = Vec::new();                // 处理选择的文件
-                for file_path in files {
-                    // 使用file_path.to_string()然后转换为PathBuf
-                    let path_string = file_path.to_string();
-                    let actual_path = PathBuf::from(path_string);
-                    println!("Processing file: {:?}", actual_path);
-                    match SongInfo::from_path(&actual_path) {
+                let mut songs_to_add = Vec::new();
+                
+                // 处理选择的文件
+                for file_path_type in files {
+                    let path_buf: PathBuf = file_path_type.path;
+                    println!("Processing file: {:?}", path_buf);
+                    
+                    match SongInfo::from_path(&path_buf) {
                         Ok(song_info) => {
                             songs_to_add.push(song_info);
                         }
                         Err(e) => {
-                            eprintln!("Error processing song from path {:?}: {}", actual_path, e);
-                            let _ = app_handle.emit_to(
+                            eprintln!("Error processing song from path {:?}: {}", path_buf, e);
+                            app_handle.emit_to(
                                 "main",
                                 "player_error",
-                                &format!("Failed to load song {}: {}", actual_path.display(), e),
-                            );
+                                &format!("Failed to load song {}: {}", path_buf.display(), e),
+                            )?;
                         }
                     }
                 }
@@ -389,8 +383,12 @@ async fn open_audio_files<R: Runtime>(
                 println!("No files selected.");
             }
         }
-        None => {
+        Ok(None) => {
             println!("File dialog was cancelled.");
+        }
+        Err(e) => {
+            eprintln!("Error picking files: {:?}", e);
+            return Err(format!("Error opening file dialog: {}", e));
         }
     }
 

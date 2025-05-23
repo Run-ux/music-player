@@ -373,20 +373,19 @@ fn run_player_thread(
                             player_state_guard.state = PlayerState::Stopped;
                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                             let _ = player_thread_event_tx.try_send(PlayerEvent::PlaylistUpdated(player_state_guard.playlist.clone()));
-                        }
-                        PlayerCommand::SetPlayMode(mode) => {
+                        }                        PlayerCommand::SetPlayMode(mode) => {
                             player_state_guard.play_mode = mode;
+                        },
+                        PlayerCommand::SetVolume(vol) => {
+                            player_state_guard.volume = vol;
+                            if let Some(sink) = &current_sink {
+                                sink.set_volume(vol);
+                            }
+                        },
+                        PlayerCommand::SeekTo(_position_secs) => {
+                            // Seek functionality not supported with current rodio Sink
+                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error("Seek not implemented".to_string()));
                         }
-+                       PlayerCommand::SetVolume(vol) => {
-+                            player_state_guard.volume = vol;
-+                            if let Some(sink) = &current_sink {
-+                                sink.set_volume(vol);
-+                            }
-+                        }
-+                       PlayerCommand::SeekTo(position_secs) => {
-+                            // Seek functionality not supported with current rodio Sink
-+                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error("Seek not implemented".to_string()));
-+                        }
                     }
                 }
                 _ = progress_interval.tick() => {
