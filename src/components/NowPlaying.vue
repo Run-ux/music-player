@@ -10,8 +10,11 @@ const props = defineProps<{
 
 // 计算专辑封面
 const albumCover = computed(() => {
-  // 这里应该根据实际情况返回专辑封面，目前使用默认图片
-  return props.song?.albumCover || '/default-album.png';
+  if (props.song?.albumCover) {
+    return props.song.albumCover;
+  } else {
+    return '/src/assets/default-cover.jpg';
+  }
 });
 
 // 计算歌曲信息
@@ -31,12 +34,11 @@ const songAlbum = computed(() => {
 <template>
   <div class="now-playing">
     <div class="album-cover">
-      <div class="cover-container" :class="{ rotating: isPlaying }">
-        <img 
+      <div class="cover-container" :class="{ rotating: isPlaying }">        <img 
           :src="albumCover" 
           alt="Album Cover" 
           class="cover-image"
-          @error="($event.target as HTMLImageElement).src = '/default-album.png'"
+          @error="($event.target as HTMLImageElement).src = '/src/assets/default-cover.jpg'"
         />
       </div>
     </div>

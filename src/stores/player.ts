@@ -94,20 +94,16 @@ export const usePlayerStore = defineStore('player', () => {
   const setPlayMode = async (mode: PlayMode) => {
     await invoke('set_play_mode', { mode });
     playMode.value = mode;
-  };
-  const openAudioFile = async () => {
-    console.log("Calling open_audio_files command...");
+  };  const openAudioFile = async () => {
     await invoke('open_audio_files');
-    console.log("open_audio_files command completed");
   };
   
   const updateProgress = (pos: number, dur: number) => {
     position.value = pos;
     duration.value = dur;
-  };
-  
-  const updatePlaylist = (newPlaylist: SongInfo[]) => {
-    playlist.value = newPlaylist;
+  };  const updatePlaylist = (newPlaylist: SongInfo[]) => {
+    // 清空现有播放列表并重新赋值以确保响应性
+    playlist.value.splice(0, playlist.value.length, ...newPlaylist);
   };
   
   const updateCurrentSong = (index: number) => {

@@ -11,9 +11,11 @@ import NowPlaying from "./components/NowPlaying.vue";
 const playerStore = usePlayerStore();
 
 // 初始化播放器
-const initPlayer = async () => {  try {
+const initPlayer = async () => {  
+  try {
     await invoke('init_player');
-      // 获取播放列表
+    
+    // 获取播放列表
     const playlist = await invoke('get_playlist') as SongInfo[];
     playerStore.updatePlaylist(playlist);
     
@@ -29,42 +31,71 @@ const initPlayer = async () => {  try {
     
     // 监听歌曲添加事件
     await listen('songs_added', async () => {
-      console.log('Songs added, refreshing playlist');
-      const updatedPlaylist = await invoke('get_playlist') as SongInfo[];
-      playerStore.updatePlaylist(updatedPlaylist);
+      try {
+        const updatedPlaylist = await invoke('get_playlist') as SongInfo[];
+        playerStore.updatePlaylist(updatedPlaylist);
+      } catch (error) {
+        console.error('Error refreshing playlist after songs_added:', error);
+      }
     });
-    
-    // 监听播放器事件
+      // 监听播放器事件
     await listen('player-event', (event: any) => {
       const payload = event.payload;
       
-      // 状态变更
-      if (payload.StateChanged) {
-        playerStore.updateState(payload.StateChanged);
-      }
-      
-      // 歌曲变更
-      if (payload.SongChanged) {
-        playerStore.updateCurrentSong(payload.SongChanged[0]);
-      }
-      
-      // 播放列表更新
-      if (payload.PlaylistUpdated) {
-        playerStore.updatePlaylist(payload.PlaylistUpdated);
-      }
-      
-      // 播放进度更新
-      if (payload.ProgressUpdate) {
-        playerStore.updateProgress(
-          payload.ProgressUpdate.position,
-          payload.ProgressUpdate.duration
-        );
-      }
-      
-      // 错误处理
-      if (payload.Error) {
-        console.error('播放器错误:', payload.Error);
-      }
+      // 新的事件格式：使用 tag 和 content 
+      if (payload.type && payload.data !== undefined) {
+          switch (payload.type) {
+          case 'StateChanged':
+            playerStore.updateState(payload.data);
+            break;
+            
+          case 'SongChanged':
+            playerStore.updateCurrentSong(payload.data[0]);
+            break;
+              case 'PlaylistUpdated':
+            if (Array.isArray(payload.data)) {
+              playerStore.updatePlaylist(payload.data);
+            } else {
+              console.error('Playlist data is not an array:', payload.data);
+            }
+            break;
+              case 'ProgressUpdate':
+            if (payload.data && typeof payload.data === 'object') {
+              playerStore.updateProgress(
+                payload.data.position,
+                payload.data.duration
+              );
+            }
+            break;
+            
+          case 'Error':
+            console.error('播放器错误:', payload.data);
+            break;
+            
+          default:
+            console.warn('Unknown event type:', payload.type);        }
+      } else {
+        // 兼容旧格式
+        if (payload.StateChanged) {
+          playerStore.updateState(payload.StateChanged);
+        }
+
+        if (payload.SongChanged) {
+          playerStore.updateCurrentSong(payload.SongChanged[0]);
+        }
+          if (payload.PlaylistUpdated) {
+          playerStore.updatePlaylist(payload.PlaylistUpdated);
+        }
+        
+        if (payload.ProgressUpdate) {
+          playerStore.updateProgress(
+            payload.ProgressUpdate.position,
+            payload.ProgressUpdate.duration
+          );
+        }
+        
+        if (payload.Error) {
+          console.error('播放器错误 (legacy):', payload.Error);        }      }
     });
     
   } catch (error) {

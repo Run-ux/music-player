@@ -53,8 +53,7 @@ const formatDuration = (seconds: number | undefined) => {
 <template>
   <div class="playlist">
     <div class="playlist-header">
-      <h3>播放列表</h3>
-      <div class="playlist-actions">
+      <h3>播放列表</h3>      <div class="playlist-actions">
         <button @click="handleAddSongs" class="action-btn add">
           <span>添加歌曲</span>
         </button>

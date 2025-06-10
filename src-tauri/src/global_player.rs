@@ -1,4 +1,4 @@
-use crate::player_fixed::{PlayerCommand, PlayerEvent};
+use crate::player_fixed::PlayerEvent;
 use crate::player_safe::SafePlayerManager as AudioPlayer;
 use std::sync::Mutex as StdMutex;
 use std::sync::{Arc, Once};
@@ -33,12 +33,9 @@ impl GlobalPlayer {
         });
 
         unsafe { INSTANCE.as_ref().unwrap() }
-    }
-
-    // 初始化播放器
+    } // 初始化播放器
     pub fn initialize(&mut self) -> (Arc<AsyncMutex<PlayerWrapper>>, mpsc::Receiver<PlayerEvent>) {
         if !self.initialized {
-            println!("真正创建新的 AudioPlayer 实例...");
             // 创建新的播放器实例
             let (audio_player, event_rx) = AudioPlayer::new();
 

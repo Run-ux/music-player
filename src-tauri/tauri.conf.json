@@ -11,9 +11,11 @@
   },  "app": {
     "windows": [
       {
-        "title": "tauri-app",
-        "width": 800,
-        "height": 600
+        "title": "音乐播放器",
+        "width": 900,
+        "height": 800,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
