@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 
 import { SongInfo } from '../stores/player';
 
@@ -12,7 +13,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   play: [];
   pause: [];
-  stop: [];
   next: [];
   previous: [];
 }>();
@@ -21,17 +21,13 @@ const position = ref(0);
 const duration = ref(0);
 const progress = ref(0);
 
-// 播放控制
-const handlePlay = () => {
-  emit('play');
-};
-
-const handlePause = () => {
-  emit('pause');
-};
-
-const handleStop = () => {
-  emit('stop');
+// 播放控制 - 合并播放和暂停为一个切换功能
+const handlePlayPause = () => {
+  if (props.isPlaying) {
+    emit('pause');
+  } else {
+    emit('play');
+  }
 };
 
 const handleNext = () => {
@@ -40,6 +36,33 @@ const handleNext = () => {
 
 const handlePrevious = () => {
   emit('previous');
+};
+
+// 进度条点击跳转功能
+const handleProgressClick = (event: MouseEvent) => {
+  if (!duration.value || !props.currentSong) return;
+  
+  const progressContainer = event.currentTarget as HTMLElement;
+  const rect = progressContainer.getBoundingClientRect();
+  const clickX = event.clientX - rect.left;
+  const progressWidth = rect.width;
+  
+  // 计算点击位置对应的时间
+  const clickPercent = clickX / progressWidth;
+  const targetPosition = Math.floor(clickPercent * duration.value);
+  
+  // 调用跳转命令
+  seekTo(targetPosition);
+};
+
+// 跳转到指定位置
+const seekTo = async (targetPosition: number) => {
+  try {
+    await invoke('seek_to', { position: targetPosition });
+    console.log('跳转到:', targetPosition, '秒');
+  } catch (error) {
+    console.error('跳转失败:', error);
+  }
 };
 
 // 格式化时间
@@ -53,20 +76,45 @@ const formatTime = (seconds: number) => {
 onMounted(async () => {
   await listen('player-event', (event: any) => {
     const payload = event.payload;
-    if (payload.ProgressUpdate) {
+    
+    // 处理新的事件格式
+    if (payload.type === 'ProgressUpdate' && payload.data) {
+      position.value = payload.data.position;
+      duration.value = payload.data.duration;
+      progress.value = duration.value > 0 ? (position.value / duration.value) * 100 : 0;
+    }
+    // 处理歌曲切换事件，立即重置进度条
+    else if (payload.type === 'SongChanged' && payload.data) {
+      const [, songInfo] = payload.data;
+      position.value = 0;
+      duration.value = songInfo?.duration || 0;
+      progress.value = 0;
+      console.log('歌曲切换，进度条重置:', songInfo?.title);
+    }
+    // 兼容旧格式
+    else if (payload.ProgressUpdate) {
       position.value = payload.ProgressUpdate.position;
       duration.value = payload.ProgressUpdate.duration;
-      progress.value = (position.value / duration.value) * 100;
+      progress.value = duration.value > 0 ? (position.value / duration.value) * 100 : 0;
+    }
+    // 兼容旧格式的歌曲切换
+    else if (payload.SongChanged) {
+      const [, songInfo] = payload.SongChanged;
+      position.value = 0;
+      duration.value = songInfo?.duration || 0;
+      progress.value = 0;
+      console.log('歌曲切换(旧格式)，进度条重置:', songInfo?.title);
     }
   });
 });
 
-// 监听当前歌曲变化
-watch(() => props.currentSong, (newSong) => {
-  if (newSong) {
+// 监听当前歌曲变化，确保props变化时也重置进度条
+watch(() => props.currentSong, (newSong, oldSong) => {
+  if (newSong && (!oldSong || newSong.path !== oldSong.path)) {
     position.value = 0;
     duration.value = newSong.duration || 0;
     progress.value = 0;
+    console.log('Props歌曲变化，进度条重置:', newSong.title);
   }
 }, { deep: true });
 </script>
@@ -78,8 +126,14 @@ watch(() => props.currentSong, (newSong) => {
         <span>{{ formatTime(position) }}</span>
         <span>{{ formatTime(duration) }}</span>
       </div>
-      <div class="progress-container">
-        <div class="progress" :style="{ width: `${progress}%` }"></div>
+      <div class="progress-container" @click="handleProgressClick">
+        <div class="progress" :style="{ width: `${progress}%` }" v-show="progress > 0"></div>
+        <div 
+          class="progress-handle" 
+          :style="{ left: `${progress}%` }" 
+          :class="{ active: progress > 0 || isPlaying }"
+          v-show="progress > 0"
+        ></div>
       </div>
     </div>
     
@@ -87,14 +141,9 @@ watch(() => props.currentSong, (newSong) => {
       <button @click="handlePrevious" class="control-btn">
         <i class="icon-previous">⏮</i>
       </button>
-      <button v-if="!isPlaying" @click="handlePlay" class="control-btn play">
-        <i class="icon-play">▶</i>
-      </button>
-      <button v-else @click="handlePause" class="control-btn pause">
-        <i class="icon-pause">⏸</i>
-      </button>
-      <button @click="handleStop" class="control-btn">
-        <i class="icon-stop">⏹</i>
+      <button @click="handlePlayPause" class="control-btn" :class="{ 'play': !isPlaying, 'pause': isPlaying }">
+        <i v-if="!isPlaying" class="icon-play">▶</i>
+        <i v-else class="icon-pause">⏸</i>
       </button>
       <button @click="handleNext" class="control-btn">
         <i class="icon-next">⏭</i>
@@ -124,16 +173,56 @@ watch(() => props.currentSong, (newSong) => {
 }
 
 .progress-container {
-  height: 6px;
+  height: 8px;
   background-color: #ddd;
-  border-radius: 3px;
-  overflow: hidden;
+  border-radius: 4px;
+  overflow: visible; /* 改为visible以便手柄可以正确显示 */
+  cursor: pointer;
+  position: relative;
+  transition: height 0.2s ease;
+}
+
+.progress-container:hover {
+  height: 10px;
 }
 
 .progress {
   height: 100%;
-  background-color: #4caf50;
-  transition: width 0.3s;
+  background: linear-gradient(90deg, #4caf50, #66bb6a);
+  transition: width 0.1s ease-out;
+  border-radius: 4px;
+  min-width: 0; /* 确保宽度为0时不显示 */
+}
+
+.progress-container:hover .progress {
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);
+}
+
+.progress-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px; /* 从14px减小到12px */
+  height: 12px; /* 从14px减小到12px */
+  background: #4caf50;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 只有在有进度或者hover时才显示手柄 */
+.progress-container:hover .progress-handle,
+.progress-handle.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.progress-handle:hover {
+  background: #45a049;
+  transform: translate(-50%, -50%) scale(1.15); /* 缩小hover放大倍数 */
 }
 
 .control-buttons {

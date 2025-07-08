@@ -2,6 +2,7 @@ use crate::player_fixed::{PlayMode, PlayerCommand, PlayerEvent, PlayerState, Son
 use rand::Rng; // Added for shuffle mode
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use rodio::Source; // 添加Source trait的导入
 
 /// 线程安全的播放器适配器
 /// 将处理分为两部分：前端可以访问的线程安全状态和后台播放器线程
@@ -82,6 +83,7 @@ impl SafePlayerManager {
     }
 
     // 获取播放器状态快照，用于初始化前端状态
+    #[allow(dead_code)]
     pub async fn get_player_state_snapshot(&self) -> SafePlayerStateSnapshot {
         let guard = self.state.lock().unwrap();
         SafePlayerStateSnapshot {
@@ -119,6 +121,11 @@ fn run_player_thread(
 ) -> anyhow::Result<()> {
     let (_stream, stream_handle) = rodio::OutputStream::try_default()?;
     let mut current_sink: Option<rodio::Sink> = None;
+    
+    // 添加播放进度追踪
+    let mut play_start_time: Option<std::time::Instant> = None;
+    let mut current_position: u64 = 0; // 当前播放位置（秒）
+    let mut paused_position: u64 = 0;  // 暂停时的播放位置（秒）
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -141,6 +148,10 @@ fn run_player_thread(
                                     if let Some(sink) = &current_sink {
                                         sink.play();
                                         player_state_guard.state = PlayerState::Playing;
+                                        
+                                        // 恢复播放时，记录新的开始时间，但考虑已经播放的时间
+                                        play_start_time = Some(std::time::Instant::now() - std::time::Duration::from_secs(paused_position));
+                                        
                                         let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                     }
                                 }
@@ -157,6 +168,11 @@ fn run_player_thread(
                                     player_state_guard.current_index = Some(index);
 
                                     let song = player_state_guard.playlist[index].clone();
+                                    
+                                    // 重置播放进度
+                                    current_position = 0;
+                                    paused_position = 0;
+                                    
                                     drop(player_state_guard); // Release lock before IO
 
                                     match std::fs::File::open(&song.path) {
@@ -172,10 +188,28 @@ fn run_player_thread(
                                                             sink.play();
                                                             current_sink = Some(sink);
 
+                                                            // 重置播放进度和开始时间
+                                                            current_position = 0;
+                                                            play_start_time = Some(std::time::Instant::now());
+
                                                             let mut player_state_guard = state.lock().unwrap(); 
                                                             player_state_guard.state = PlayerState::Playing;
+                                                            
+                                                            // 重置播放进度追踪变量
+                                                            current_position = 0;
+                                                            paused_position = 0;
+                                                            play_start_time = Some(std::time::Instant::now());
+                                                            
                                                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
+                                                            
+                                                            // 立即发送初始进度更新事件，确保前端进度条重置
+                                                            if let Some(duration) = song.duration {
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                                    position: 0, 
+                                                                    duration 
+                                                                });
+                                                            }
                                                         }
                                                         Err(e) => {
                                                             let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e)));
@@ -198,16 +232,15 @@ fn run_player_thread(
                             if let Some(sink) = &current_sink {
                                 sink.pause();
                                 player_state_guard.state = PlayerState::Paused;
+                                
+                                // 保存当前播放位置用于恢复播放
+                                if let Some(start_time) = play_start_time {
+                                    paused_position = start_time.elapsed().as_secs();
+                                    // 记录下来，但是不重置 play_start_time，我们会在恢复播放时调整它
+                                }
+                                
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                             }
-                        }
-                        PlayerCommand::Stop => {
-                            if let Some(sink) = current_sink.take() { 
-                                sink.stop();
-                            }
-                            player_state_guard.state = PlayerState::Stopped;
-                            // player_state_guard.current_index = None; // Optionally reset index on stop
-                            let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                         }
                         PlayerCommand::Next | PlayerCommand::Previous => {
                             if player_state_guard.playlist.is_empty() {
@@ -235,7 +268,7 @@ fn run_player_thread(
                                 _ => unreachable!(),
                             };
 
-                            if playlist_len == 0 { // Should be caught by is_empty earlier, but as a safeguard
+                            if playlist_len == 0 {
                                 player_state_guard.current_index = None;
                                 if let Some(sink) = current_sink.take() {
                                     sink.stop();
@@ -247,6 +280,12 @@ fn run_player_thread(
 
                             player_state_guard.current_index = Some(new_index);
                             let song = player_state_guard.playlist[new_index].clone();
+                            
+                            // 重置播放进度
+                            current_position = 0;
+                            paused_position = 0;
+                            play_start_time = None; // 不设置播放开始时间
+                            
                             drop(player_state_guard); 
 
                             if let Some(sink) = current_sink.take() {
@@ -258,13 +297,28 @@ fn run_player_thread(
                                     Ok(source) => match rodio::Sink::try_new(&stream_handle) {
                                         Ok(sink) => {
                                             sink.append(source);
-                                            sink.play();
+                                            // 默认暂停，不自动播放
+                                            sink.pause();
                                             current_sink = Some(sink);
 
                                             let mut player_state_guard = state.lock().unwrap(); 
-                                            player_state_guard.state = PlayerState::Playing;
+                                            // 设置为暂停状态，而不是播放状态
+                                            player_state_guard.state = PlayerState::Paused;
+                                            
+                                            // 重置播放进度追踪变量
+                                            current_position = 0;
+                                            paused_position = 0;
+                                            
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(new_index, song.clone()));
+                                                
+                                            // 立即发送初始进度更新事件，确保前端进度条重置
+                                            if let Some(duration) = song.duration {
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                    position: 0, 
+                                                    duration 
+                                                });
+                                            }
                                         }
                                         Err(e) => { let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e))); }
                                     },
@@ -278,31 +332,72 @@ fn run_player_thread(
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::Error("无效的歌曲索引".to_string()));
                                 continue;
                             }
+                            
+                            let was_playing = player_state_guard.state == PlayerState::Playing;
                             player_state_guard.current_index = Some(index);
                             let song = player_state_guard.playlist[index].clone();
+                            
                             drop(player_state_guard); 
 
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
                             }
-                             match std::fs::File::open(&song.path) {
+                            
+                            match std::fs::File::open(&song.path) {
                                 Ok(file) => match rodio::Decoder::new(std::io::BufReader::new(file)) {
                                     Ok(source) => match rodio::Sink::try_new(&stream_handle) {
                                         Ok(sink) => {
                                             sink.append(source);
-                                            sink.play();
+                                            
+                                            // 根据之前的状态决定是否自动播放
+                                            if was_playing {
+                                                sink.play();
+                                                play_start_time = Some(std::time::Instant::now());
+                                                current_position = 0;
+                                                paused_position = 0;
+                                            } else {
+                                                sink.pause();
+                                                play_start_time = None;
+                                                current_position = 0;
+                                                paused_position = 0;
+                                            }
+                                            
                                             current_sink = Some(sink);
 
                                             let mut player_state_guard = state.lock().unwrap(); 
-                                            player_state_guard.state = PlayerState::Playing;
-                                            let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                                            
+                                            // 设置正确的播放状态
+                                            player_state_guard.state = if was_playing {
+                                                PlayerState::Playing
+                                            } else {
+                                                PlayerState::Paused
+                                            };
+                                            
+                                            // 先发送歌曲变化事件
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
+                                            
+                                            // 然后发送状态变化事件
+                                            let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                                            
+                                            // 立即发送初始进度更新事件，确保前端进度条重置
+                                            if let Some(duration) = song.duration {
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                    position: 0, 
+                                                    duration 
+                                                });
+                                            }
                                         }
-                                        Err(e) => { let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e))); }
+                                        Err(e) => { 
+                                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e))); 
+                                        }
                                     },
-                                    Err(e) => { let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("解码音频文件失败: {}", e))); }
+                                    Err(e) => { 
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("解码音频文件失败: {}", e))); 
+                                    }
                                 },
-                                Err(e) => { let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e))); }
+                                Err(e) => { 
+                                    let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e))); 
+                                }
                             }
                         }
                         PlayerCommand::AddSongs(songs) => {
@@ -382,9 +477,89 @@ fn run_player_thread(
                                 sink.set_volume(vol);
                             }
                         },
-                        PlayerCommand::SeekTo(_position_secs) => {
-                            // Seek functionality not supported with current rodio Sink
-                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error("Seek not implemented".to_string()));
+                        PlayerCommand::SeekTo(position_secs) => {
+                            if let Some(current_idx) = player_state_guard.current_index {
+                                if let Some(song) = player_state_guard.playlist.get(current_idx) {
+                                    if let Some(duration) = song.duration {
+                                        // 确保跳转位置在有效范围内
+                                        let seek_position = position_secs.min(duration);
+                                        
+                                        println!("收到跳转请求: {}秒", seek_position);
+                                        
+                                        // 获取当前播放状态
+                                        let was_playing = player_state_guard.state == PlayerState::Playing;
+                                        let song_clone = song.clone();
+                                        
+                                        // 立即发送进度更新事件，给用户即时反馈
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                            position: seek_position, 
+                                            duration 
+                                        });
+                                        
+                                        drop(player_state_guard);
+                                        
+                                        // 停止当前播放
+                                        if let Some(sink) = current_sink.take() {
+                                            sink.stop();
+                                        }
+                                        
+                                        // 重新加载文件并跳转到指定位置
+                                        match std::fs::File::open(&song_clone.path) {
+                                            Ok(file) => {
+                                                match rodio::Decoder::new(std::io::BufReader::new(file)) {
+                                                    Ok(source) => {
+                                                        // 使用skip_duration跳过指定时长
+                                                        let skip_duration = std::time::Duration::from_secs(seek_position);
+                                                        let skipped_source = source.skip_duration(skip_duration);
+                                                        
+                                                        match rodio::Sink::try_new(&stream_handle) {
+                                                            Ok(sink) => {
+                                                                sink.append(skipped_source);
+                                                                
+                                                                // 根据之前的状态决定是否播放
+                                                                if was_playing {
+                                                                    sink.play();
+                                                                    // 调整播放开始时间
+                                                                    play_start_time = Some(std::time::Instant::now() - std::time::Duration::from_secs(seek_position));
+                                                                } else {
+                                                                    sink.pause();
+                                                                    paused_position = seek_position;
+                                                                }
+                                                                
+                                                                current_sink = Some(sink);
+                                                                current_position = seek_position;
+                                                                
+                                                                println!("成功跳转到位置: {}秒", seek_position);
+                                                                
+                                                                // 发送确认的进度更新
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                                    position: seek_position, 
+                                                                    duration 
+                                                                });
+                                                            }
+                                                            Err(e) => {
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("跳转时无法创建音频sink: {}", e)));
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("跳转时解码音频文件失败: {}", e)));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("跳转时无法打开音频文件: {}", e)));
+                                            }
+                                        }
+                                    } else {
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error("无法跳转：歌曲时长未知".to_string()));
+                                    }
+                                } else {
+                                    let _ = player_thread_event_tx.try_send(PlayerEvent::Error("无法跳转：当前没有播放的歌曲".to_string()));
+                                }
+                            } else {
+                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error("无法跳转：没有选中的歌曲".to_string()));
+                            }
                         }
                     }
                 }
@@ -400,16 +575,31 @@ fn run_player_thread(
                                     }
                                 }
                             } else {
-                                // Progress update
+                                // 更新播放进度
                                 if let Some(idx) = player_state_guard.current_index {
                                     if let Some(song) = player_state_guard.playlist.get(idx) {
                                         if let Some(duration) = song.duration {
-                                            // Position calculation is still a challenge with rodio 0.17 Sink.
-                                            // For now, sending a placeholder or a rough estimate.
-                                            // rodio::Sink::len() is samples remaining. rodio::Sink::elapsed() is not available.
-                                            // A true position requires more complex tracking or a library update.
-                                            let position: u64 = 0; // Placeholder for actual position
-                                            let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { position, duration });
+                                            // 计算当前播放位置
+                                            if let Some(start_time) = play_start_time {
+                                                // 计算当前播放时间（秒）
+                                                let elapsed = start_time.elapsed().as_secs();
+                                                current_position = elapsed;
+                                                
+
+                                                // 如果到达歌曲结尾或超出时长，自动切换到下一首
+                                                if current_position >= duration && !sink.empty() {
+                                                    drop(player_state_guard);
+                                                    if command_sender_for_internal_use.try_send(PlayerCommand::Next).is_err() {
+                                                        eprintln!("播放器线程: 无法发送内部 Next 命令 (通道已满或已关闭)");
+                                                    }
+                                                } else {
+                                                    // 发送进度更新事件
+                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                        position: current_position, 
+                                                        duration 
+                                                    });
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -421,6 +611,11 @@ fn run_player_thread(
                         if let Some(sink) = current_sink.take() {
                             sink.stop();
                         }
+                        
+                        // 重置播放进度和计时器
+                        current_position = 0;
+                        paused_position = 0;
+                        play_start_time = None;
                     }
                 }
                 else => {

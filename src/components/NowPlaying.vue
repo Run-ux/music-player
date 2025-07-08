@@ -76,6 +76,8 @@ const songAlbum = computed(() => {
   border-radius: 50%;
   overflow: hidden;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  transform-origin: center center;
+  transition: transform 0.5s ease-out;
 }
 
 .cover-image {
@@ -90,6 +92,7 @@ const songAlbum = computed(() => {
 
 .rotating {
   animation: rotate 20s linear infinite;
+  animation-play-state: running;
 }
 
 @keyframes rotate {
@@ -99,6 +102,13 @@ const songAlbum = computed(() => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 添加暂停时的样式 */
+.cover-container:not(.rotating) {
+  animation: none;
+  /* 确保暂停时保持当前旋转位置 */
+  transform: rotate(var(--current-rotation, 0deg));
 }
 
 .song-details {

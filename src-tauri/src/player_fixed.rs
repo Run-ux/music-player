@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader};
 use std::path::Path; // 移除未使用的PathBuf导入
 
 use anyhow::Result;
@@ -12,6 +12,7 @@ use thiserror::Error;
 
 /// 音乐播放器错误类型
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum PlayerError {
     #[error("IO错误: {0}")]
     IoError(#[from] std::io::Error),
@@ -71,6 +72,9 @@ impl SongInfo {    /// 从文件路径创建歌曲信息
             Ok(tag) => {
                 // 提取专辑封面
                 let album_cover = Self::extract_album_cover(&tag);
+                
+                // 尝试从ID3标签获取时长
+                let duration = tag.duration().map(|d| d as u64);
 
                 SongInfo {
                     path: path_str,
@@ -78,7 +82,7 @@ impl SongInfo {    /// 从文件路径创建歌曲信息
                     artist: tag.artist().map(|s| s.to_string()),
                     album: tag.album().map(|s| s.to_string()),
                     album_cover,
-                    duration: None,
+                    duration,
                 }
             }
             Err(_) => {
@@ -97,16 +101,17 @@ impl SongInfo {    /// 从文件路径创建歌曲信息
             }
         };
 
-        // 尝试获取音频时长（需要打开文件并解码以获取时长）
-        if let Ok(file) = File::open(path) {
-            // rodio::Source is needed for total_duration
-            // Ensure rodio::Source is available or find alternative for duration
-            if let Ok(source) = rodio::Decoder::new(BufReader::new(file)) {
-                // rodio::Source trait is needed for total_duration()
-                use rodio::Source;
-                song_info.duration = source.total_duration().map(|d| d.as_secs());
-            }
+        // 如果标签中没有时长信息，尝试从文件解码获取
+        if song_info.duration.is_none() {
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            
+            // 使用更准确的时长获取方法
+            song_info.duration = Self::get_accurate_duration(path, &ext);
         }
+        
         Ok(song_info)
     }    /// 从ID3标签提取专辑封面
     fn extract_album_cover(tag: &Tag) -> Option<String> {
@@ -206,6 +211,248 @@ impl SongInfo {    /// 从文件路径创建歌曲信息
         let base64_string = base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes);
 
         Ok(base64_string)
+    }    /// 获取OGG文件时长（专门针对OGG文件的解析方法）
+    #[allow(dead_code)]
+    fn get_ogg_duration(path: &Path) -> Option<u64> {
+        use std::io::Read;
+
+        // 简化的OGG时长获取，避免复杂的页面解析
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(_) => return None,
+        };
+
+        let mut header = [0; 512];
+        if file.read(&mut header).is_err() {
+            return None;
+        }
+
+        // 检查是否为OGG文件
+        if &header[0..4] != b"OggS" {
+            return None;
+        }
+
+        // 对于OGG文件，我们使用文件大小估算
+        if let Ok(metadata) = std::fs::metadata(path) {
+            let file_size_bytes = metadata.len() as f64;
+            // OGG Vorbis 通常使用较低的比特率
+            let bitrate = 128000.0; // 128 kbps
+            let estimated_seconds = (file_size_bytes / (bitrate / 8.0)).round() as u64;
+            
+            if estimated_seconds > 0 && estimated_seconds < 10800 {
+                return Some(estimated_seconds);
+            }
+        }
+
+        None
+    }
+
+    /// 获取文件的准确时长（支持多种音频格式）
+    fn get_accurate_duration(path: &Path, ext: &str) -> Option<u64> {
+        println!("正在获取文件时长: {}", path.display());
+        
+        // 方法1: 使用rodio解码器获取时长（最准确）
+        if let Some(duration) = Self::try_rodio_duration(path) {
+            println!("通过rodio获取到时长: {}秒", duration);
+            return Some(duration);
+        }
+        
+        // 方法2: 针对不同格式使用专门的解析方法
+        let duration = match ext {
+            "ogg" => Self::get_ogg_duration_advanced(path),
+            "mp3" => Self::get_mp3_duration(path),
+            "flac" => Self::get_flac_duration(path),
+            "wav" => Self::get_wav_duration(path),
+            "m4a" | "aac" => Self::get_aac_duration(path),
+            _ => None,
+        };
+        
+        if let Some(d) = duration {
+            println!("通过格式特定方法获取到时长: {}秒", d);
+            return Some(d);
+        }
+        
+        // 方法3: 使用文件大小估算（最后的兜底方案）
+        let estimated = Self::estimate_duration_from_filesize(path, ext);
+        if let Some(d) = estimated {
+            println!("通过文件大小估算时长: {}秒", d);
+        }
+        
+        estimated
+    }
+    
+    /// 尝试使用rodio解码器获取时长
+    fn try_rodio_duration(path: &Path) -> Option<u64> {
+        // 尝试多次，有时第一次会失败
+        for attempt in 0..3 {
+            if let Ok(file) = File::open(path) {
+                let reader = BufReader::new(file);
+                if let Ok(source) = rodio::Decoder::new(reader) {
+                    use rodio::Source;
+                    if let Some(total_duration) = source.total_duration() {
+                        let seconds = total_duration.as_secs();
+                        // 有效性检查
+                        if seconds > 0 && seconds < 10800 { // 0-3小时范围
+                            return Some(seconds);
+                        }
+                    }
+                }
+            }
+            
+            // 如果失败，稍等一下再试
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        None
+    }
+    
+    /// 高级OGG时长获取方法
+    fn get_ogg_duration_advanced(path: &Path) -> Option<u64> {
+        use std::io::{Read, Seek, SeekFrom};
+        
+        let mut file = File::open(path).ok()?;
+        let mut buffer = vec![0u8; 1024];
+        
+        // 读取文件头
+        file.read_exact(&mut buffer[..27]).ok()?;
+        
+        // 检查OGG签名
+        if &buffer[0..4] != b"OggS" {
+            return None;
+        }
+        
+        // 尝试查找最后一个OGG页面来获取总时长
+        let file_size = file.metadata().ok()?.len();
+        if file_size < 1024 {
+            return Self::estimate_duration_from_filesize(path, "ogg");
+        }
+        
+        // 从文件末尾开始查找
+        let search_pos = file_size.saturating_sub(65536).max(0);
+        file.seek(SeekFrom::Start(search_pos)).ok()?;
+        
+        let mut last_buffer = vec![0u8; 65536];
+        let bytes_read = file.read(&mut last_buffer).ok()?;
+        
+        // 在缓冲区中查找最后的OGG页面
+        for i in (0..bytes_read.saturating_sub(27)).rev() {
+            if &last_buffer[i..i+4] == b"OggS" {
+                // 尝试解析granule position (字节14-21)
+                if i + 21 < bytes_read {
+                    let granule_pos = u64::from_le_bytes([
+                        last_buffer[i+6], last_buffer[i+7], last_buffer[i+8], last_buffer[i+9],
+                        last_buffer[i+10], last_buffer[i+11], last_buffer[i+12], last_buffer[i+13]
+                    ]);
+                    
+                    if granule_pos > 0 && granule_pos < 0xFFFFFFFFFFFFFFFF {
+                        // 对于Vorbis，granule position通常是采样数
+                        // 假设采样率为44100 Hz（CD质量）
+                        let duration_seconds = granule_pos / 44100;
+                        if duration_seconds > 0 && duration_seconds < 10800 {
+                            return Some(duration_seconds);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 如果无法解析页面，使用文件大小估算
+        Self::estimate_duration_from_filesize(path, "ogg")
+    }
+    
+    /// MP3时长获取
+    fn get_mp3_duration(path: &Path) -> Option<u64> {
+        // 对于MP3，先尝试使用ID3标签，然后使用文件大小估算
+        if let Ok(tag) = Tag::read_from_path(path) {
+            if let Some(duration) = tag.duration() {
+                return Some(duration as u64);
+            }
+        }
+        Self::estimate_duration_from_filesize(path, "mp3")
+    }
+    
+    /// FLAC时长获取
+    fn get_flac_duration(path: &Path) -> Option<u64> {
+        use std::io::Read;
+        
+        let mut file = File::open(path).ok()?;
+        let mut header = [0u8; 4];
+        file.read_exact(&mut header).ok()?;
+        
+        // 检查FLAC签名
+        if &header != b"fLaC" {
+            return None;
+        }
+        
+        // FLAC的metadata通常在文件开头，这里使用估算
+        Self::estimate_duration_from_filesize(path, "flac")
+    }
+    
+    /// WAV时长获取
+    fn get_wav_duration(path: &Path) -> Option<u64> {
+        use std::io::Read;
+        
+        let mut file = File::open(path).ok()?;
+        let mut header = [0u8; 44]; // WAV header通常是44字节
+        
+        if file.read_exact(&mut header).is_err() {
+            return None;
+        }
+        
+        // 检查WAV签名
+        if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+            return None;
+        }
+        
+        // 提取采样率和数据大小
+        let sample_rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+        let byte_rate = u32::from_le_bytes([header[28], header[29], header[30], header[31]]);
+        
+        if sample_rate > 0 && byte_rate > 0 {
+            let data_size = file.metadata().ok()?.len().saturating_sub(44);
+            let duration_seconds = data_size / byte_rate as u64;
+            
+            if duration_seconds > 0 && duration_seconds < 10800 {
+                return Some(duration_seconds);
+            }
+        }
+        
+        Self::estimate_duration_from_filesize(path, "wav")
+    }
+    
+    /// AAC/M4A时长获取
+    fn get_aac_duration(path: &Path) -> Option<u64> {
+        // AAC/M4A格式比较复杂，这里使用估算
+        Self::estimate_duration_from_filesize(path, "m4a")
+    }
+    
+    /// 基于文件大小估算时长
+    fn estimate_duration_from_filesize(path: &Path, ext: &str) -> Option<u64> {
+        let metadata = std::fs::metadata(path).ok()?;
+        let file_size_bytes = metadata.len() as f64;
+        
+        // 根据文件扩展名估计比特率（单位：比特每秒）
+        let bitrate = match ext {
+            "mp3" => 160000.0,      // 中等质量MP3
+            "flac" => 850000.0,     // 无损格式，稍微保守一点
+            "wav" => 1411200.0,     // 标准CD质量无压缩
+            "ogg" => 112000.0,      // OGG Vorbis，稍微保守
+            "m4a" | "aac" => 128000.0, // AAC格式
+            "wma" => 128000.0,      // Windows Media Audio
+            _ => 128000.0,          // 默认值
+        };
+        
+        // 文件大小（字节） / (比特率（比特/秒） / 8) = 秒数
+        let estimated_seconds = (file_size_bytes / (bitrate / 8.0)).round() as u64;
+        
+        // 有效性检查
+        if estimated_seconds > 0 && estimated_seconds < 10800 { // 最长3小时
+            Some(estimated_seconds)
+        } else {
+            println!("估算时长超出合理范围: {}秒", estimated_seconds);
+            None
+        }
     }
 }
 
@@ -225,7 +472,6 @@ pub enum PlayerEvent {
 pub enum PlayerCommand {
     Play,
     Pause,
-    Stop,
     Next,
     Previous,
     SetSong(usize),
