@@ -9,6 +9,9 @@ use image::{ImageFormat, Rgb, RgbImage};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use thiserror::Error;
+// 添加新的元数据库依赖
+use lofty::{AudioFile, Probe, TaggedFileExt, Accessor};
+use audiotags::Tag as AudioTag;
 
 /// 音乐播放器错误类型
 #[derive(Debug, Error)]
@@ -64,11 +67,130 @@ pub struct SongInfo {
     pub duration: Option<u64>, // 单位：秒
 }
 
-impl SongInfo {    /// 从文件路径创建歌曲信息
+impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策略
     pub fn from_path(path: &Path) -> Result<Self> {
         let path_str = path.to_string_lossy().into_owned();
+        println!("正在解析音频文件: {}", path.display());
         
-        let mut song_info = match Tag::read_from_path(path) {
+        // 策略1: 使用 lofty 库（最强大的通用库）
+        if let Some(song_info) = Self::try_lofty_extraction(path) {
+            println!("✅ 使用 lofty 库成功提取元数据");
+            return Ok(song_info);
+        }
+        
+        // 策略2: 使用 audiotags 库
+        if let Some(song_info) = Self::try_audiotags_extraction(path) {
+            println!("✅ 使用 audiotags 库成功提取元数据");
+            return Ok(song_info);
+        }
+        
+        // 策略3: 使用格式特定的方法（原有的 ID3/FLAC/OGG 方法）
+        if let Some(song_info) = Self::try_format_specific_extraction(path) {
+            println!("✅ 使用格式特定方法成功提取元数据");
+            return Ok(song_info);
+        }
+        
+        // 策略4: 兜底方案，使用文件名作为标题
+        println!("⚠️  所有元数据提取方法都失败，使用兜底方案");
+        let song_info = Self::create_fallback_song_info(path);
+        Ok(song_info)
+    }    /// 策略1: 使用 lofty 库提取元数据和封面
+    fn try_lofty_extraction(path: &Path) -> Option<SongInfo> {
+        match Probe::open(path).and_then(|probe| probe.read()) {
+            Ok(tagged_file) => {
+                let path_str = path.to_string_lossy().into_owned();
+                let tag = tagged_file.primary_tag()?;
+                
+                // 提取基本信息
+                let title = tag.title().map(|s| s.to_string());
+                let artist = tag.artist().map(|s| s.to_string());
+                let album = tag.album().map(|s| s.to_string());
+                
+                // 提取封面
+                let album_cover = Self::extract_cover_from_lofty(&tagged_file)
+                    .or_else(|| Self::get_default_album_cover());
+                
+                // 提取时长
+                let duration = tagged_file.properties().duration().as_secs();
+                let duration = if duration > 0 && duration < 10800 { Some(duration) } else { None };
+                
+                println!("lofty 提取结果: title={:?}, artist={:?}, cover={}", 
+                    title, artist, album_cover.is_some());
+                
+                Some(SongInfo {
+                    path: path_str,
+                    title,
+                    artist,
+                    album,
+                    album_cover,
+                    duration,
+                })
+            }
+            Err(e) => {
+                println!("lofty 提取失败: {}", e);
+                None
+            }
+        }
+    }    /// 策略2: 使用 audiotags 库提取元数据和封面  
+    fn try_audiotags_extraction(path: &Path) -> Option<SongInfo> {
+        match AudioTag::new().read_from_path(path) {
+            Ok(tag) => {
+                let path_str = path.to_string_lossy().into_owned();
+                
+                // 提取基本信息
+                let title = tag.title().map(|s| s.to_string());
+                let artist = tag.artist().map(|s| s.to_string());
+                let album = tag.album_title().map(|s| s.to_string());
+                
+                // 提取封面 - 直接在这里处理而不是调用单独的函数
+                let album_cover = if let Some(artwork) = tag.album_cover() {
+                    match Self::convert_image_to_base64(&artwork.data) {
+                        Ok(base64_string) => {
+                            // audiotags 的 MIME 类型处理
+                            let mime_type = match artwork.mime_type {
+                                audiotags::MimeType::Jpeg => "image/jpeg",
+                                audiotags::MimeType::Png => "image/png",
+                                _ => "image/jpeg", // 默认
+                            };
+                            let data_url = format!("data:{};base64,{}", mime_type, base64_string);
+                            println!("从 audiotags 成功提取封面，MIME类型: {}", mime_type);
+                            Some(data_url)
+                        }
+                        Err(e) => {
+                            println!("audiotags 封面转换失败: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    println!("audiotags 未找到封面");
+                    None
+                }.or_else(|| Self::get_default_album_cover());
+                
+                // 提取时长
+                let duration = tag.duration().map(|d| d as u64);
+                
+                println!("audiotags 提取结果: title={:?}, artist={:?}, cover={}", 
+                    title, artist, album_cover.is_some());
+                
+                Some(SongInfo {
+                    path: path_str,
+                    title,
+                    artist,
+                    album,
+                    album_cover,
+                    duration,
+                })
+            }
+            Err(e) => {
+                println!("audiotags 提取失败: {}", e);
+                None
+            }
+        }
+    }    /// 策略3: 使用格式特定的方法（原有方法）
+    fn try_format_specific_extraction(path: &Path) -> Option<SongInfo> {
+        let path_str = path.to_string_lossy().into_owned();
+        
+        match Tag::read_from_path(path) {
             Ok(tag) => {
                 // 提取专辑封面
                 let album_cover = Self::extract_album_cover(&tag);
@@ -76,43 +198,66 @@ impl SongInfo {    /// 从文件路径创建歌曲信息
                 // 尝试从ID3标签获取时长
                 let duration = tag.duration().map(|d| d as u64);
 
-                SongInfo {
+                println!("格式特定方法提取结果: title={:?}, artist={:?}, cover={}", 
+                    tag.title(), tag.artist(), album_cover.is_some());
+
+                Some(SongInfo {
                     path: path_str,
                     title: tag.title().map(|s| s.to_string()),
                     artist: tag.artist().map(|s| s.to_string()),
                     album: tag.album().map(|s| s.to_string()),
                     album_cover,
                     duration,
-                }
+                })
             }
-            Err(_) => {
-                // 如果无法读取标签，则使用文件名作为标题，并设置默认封面
-                SongInfo {
-                    path: path_str,
-                    title: path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.to_string()),
-                    artist: None,
-                    album: None,
-                    album_cover: Self::get_default_album_cover(),
-                    duration: None,
-                }
+            Err(e) => {
+                println!("格式特定方法提取失败: {}", e);
+                None
             }
-        };
-
-        // 如果标签中没有时长信息，尝试从文件解码获取
-        if song_info.duration.is_none() {
-            let ext = path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            
-            // 使用更准确的时长获取方法
-            song_info.duration = Self::get_accurate_duration(path, &ext);
         }
+    }    /// 策略4: 创建兜底歌曲信息
+    fn create_fallback_song_info(path: &Path) -> SongInfo {
+        let path_str = path.to_string_lossy().into_owned();
         
-        Ok(song_info)
+        // 尝试获取时长
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let duration = Self::get_accurate_duration(path, &ext);
+        
+        SongInfo {
+            path: path_str,
+            title: path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string()),
+            artist: None,
+            album: None,
+            album_cover: Self::get_default_album_cover(),
+            duration,
+        }
+    }    /// 从 lofty 提取封面
+    fn extract_cover_from_lofty(tagged_file: &lofty::TaggedFile) -> Option<String> {
+        if let Some(tag) = tagged_file.primary_tag() {
+            for picture in tag.pictures() {
+                match Self::convert_image_to_base64(&picture.data()) {
+                    Ok(base64_string) => {
+                        let mime_type = picture.mime_type()
+                            .map(|mt| mt.as_str())
+                            .unwrap_or("image/jpeg");
+                        let data_url = format!("data:{};base64,{}", mime_type, base64_string);
+                        println!("从 lofty 成功提取封面，MIME类型: {}", mime_type);
+                        return Some(data_url);
+                    }
+                    Err(e) => {
+                        println!("lofty 封面转换失败: {}", e);
+                        continue;
+                    }
+                }
+            }
+        }
+        println!("lofty 未找到封面");
+        None
     }    /// 从ID3标签提取专辑封面
     fn extract_album_cover(tag: &Tag) -> Option<String> {
         // 查找第一个图片
