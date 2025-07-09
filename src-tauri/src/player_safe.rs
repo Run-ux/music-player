@@ -83,7 +83,6 @@ impl SafePlayerManager {
     }
 
     // 获取播放器状态快照，用于初始化前端状态
-    #[allow(dead_code)]
     pub async fn get_player_state_snapshot(&self) -> SafePlayerStateSnapshot {
         let guard = self.state.lock().unwrap();
         SafePlayerStateSnapshot {
@@ -242,6 +241,14 @@ fn run_player_thread(
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                             }
                         }
+                        PlayerCommand::Stop => {
+                            if let Some(sink) = current_sink.take() { 
+                                sink.stop();
+                            }
+                            player_state_guard.state = PlayerState::Stopped;
+                            // player_state_guard.current_index = None; // Optionally reset index on stop
+                            let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                        }
                         PlayerCommand::Next | PlayerCommand::Previous => {
                             if player_state_guard.playlist.is_empty() {
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::Error("播放列表为空".to_string()));
@@ -268,7 +275,7 @@ fn run_player_thread(
                                 _ => unreachable!(),
                             };
 
-                            if playlist_len == 0 {
+                            if playlist_len == 0 { // Should be caught by is_empty earlier, but as a safeguard
                                 player_state_guard.current_index = None;
                                 if let Some(sink) = current_sink.take() {
                                     sink.stop();
@@ -284,7 +291,7 @@ fn run_player_thread(
                             // 重置播放进度
                             current_position = 0;
                             paused_position = 0;
-                            play_start_time = None; // 不设置播放开始时间
+                            play_start_time = Some(std::time::Instant::now());
                             
                             drop(player_state_guard); 
 
@@ -297,17 +304,16 @@ fn run_player_thread(
                                     Ok(source) => match rodio::Sink::try_new(&stream_handle) {
                                         Ok(sink) => {
                                             sink.append(source);
-                                            // 默认暂停，不自动播放
-                                            sink.pause();
+                                            sink.play();
                                             current_sink = Some(sink);
 
                                             let mut player_state_guard = state.lock().unwrap(); 
-                                            // 设置为暂停状态，而不是播放状态
-                                            player_state_guard.state = PlayerState::Paused;
+                                            player_state_guard.state = PlayerState::Playing;
                                             
                                             // 重置播放进度追踪变量
                                             current_position = 0;
                                             paused_position = 0;
+                                            play_start_time = Some(std::time::Instant::now());
                                             
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(new_index, song.clone()));
@@ -503,27 +509,39 @@ fn run_player_thread(
                                             sink.stop();
                                         }
                                         
-                                        // 重新加载文件并跳转到指定位置
+                                        // 重新加载文件并从指定位置开始播放
                                         match std::fs::File::open(&song_clone.path) {
                                             Ok(file) => {
                                                 match rodio::Decoder::new(std::io::BufReader::new(file)) {
-                                                    Ok(source) => {
-                                                        // 使用skip_duration跳过指定时长
-                                                        let skip_duration = std::time::Duration::from_secs(seek_position);
-                                                        let skipped_source = source.skip_duration(skip_duration);
-                                                        
+                                                    Ok(mut source) => {
+                                                        // 创建新的sink
                                                         match rodio::Sink::try_new(&stream_handle) {
                                                             Ok(sink) => {
-                                                                sink.append(skipped_source);
+                                                                // 如果跳转位置大于0，尝试跳过指定时长
+                                                                if seek_position > 0 {
+                                                                    let skip_duration = std::time::Duration::from_secs(seek_position);
+                                                                    
+                                                                    // 使用更精确的跳转方法
+                                                                    let mut samples_to_skip = skip_duration.as_secs_f64() * source.sample_rate() as f64;
+                                                                    samples_to_skip *= source.channels() as f64;
+                                                                    
+                                                                    // 尝试跳过指定的采样数
+                                                                    let skipped_source = source.skip_duration(skip_duration);
+                                                                    sink.append(skipped_source);
+                                                                } else {
+                                                                    // 如果跳转位置为0，直接播放
+                                                                    sink.append(source);
+                                                                }
                                                                 
                                                                 // 根据之前的状态决定是否播放
                                                                 if was_playing {
                                                                     sink.play();
-                                                                    // 调整播放开始时间
+                                                                    // 调整播放开始时间，考虑跳转位置
                                                                     play_start_time = Some(std::time::Instant::now() - std::time::Duration::from_secs(seek_position));
                                                                 } else {
                                                                     sink.pause();
                                                                     paused_position = seek_position;
+                                                                    play_start_time = None;
                                                                 }
                                                                 
                                                                 current_sink = Some(sink);
@@ -531,11 +549,26 @@ fn run_player_thread(
                                                                 
                                                                 println!("成功跳转到位置: {}秒", seek_position);
                                                                 
-                                                                // 发送确认的进度更新
+                                                                // 更新播放器状态
+                                                                let mut player_state_guard = state.lock().unwrap();
+                                                                if was_playing {
+                                                                    player_state_guard.state = PlayerState::Playing;
+                                                                } else {
+                                                                    player_state_guard.state = PlayerState::Paused;
+                                                                }
+                                                                drop(player_state_guard);
+                                                                
+                                                                // 发送确认的进度更新和状态更新
                                                                 let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
                                                                     position: seek_position, 
                                                                     duration 
                                                                 });
+                                                                
+                                                                if was_playing {
+                                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Playing));
+                                                                } else {
+                                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Paused));
+                                                                }
                                                             }
                                                             Err(e) => {
                                                                 let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("跳转时无法创建音频sink: {}", e)));

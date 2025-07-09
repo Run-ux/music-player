@@ -12,15 +12,15 @@ export interface SongInfo {
 }
 
 export enum PlayerState {
-  Playing = 'PLAYING',
-  Paused = 'PAUSED',
-  Stopped = 'STOPPED'
+  Playing = 'Playing',
+  Paused = 'Paused',
+  Stopped = 'Stopped'
 }
 
 export enum PlayMode {
-  Sequential = 'SEQUENTIAL',
-  Repeat = 'REPEAT',
-  Shuffle = 'SHUFFLE'
+  Sequential = 'Sequential',
+  Repeat = 'Repeat',
+  Shuffle = 'Shuffle'
 }
 
 export const usePlayerStore = defineStore('player', () => {
@@ -100,7 +100,9 @@ export const usePlayerStore = defineStore('player', () => {
   const setPlayMode = async (mode: PlayMode) => {
     await invoke('set_play_mode', { mode });
     playMode.value = mode;
-  };  const openAudioFile = async () => {
+  };  
+
+  const openAudioFile = async () => {
     await invoke('open_audio_files');
   };
 
@@ -145,6 +147,10 @@ export const usePlayerStore = defineStore('player', () => {
   const updateState = (newState: PlayerState) => {
     state.value = newState;
   };
+
+  const updatePlayMode = (mode: PlayMode) => {
+    playMode.value = mode;
+  };
   
   return {
     // 状态
@@ -175,6 +181,7 @@ export const usePlayerStore = defineStore('player', () => {
     updateProgress,
     updatePlaylist,
     updateCurrentSong,
-    updateState
+    updateState,
+    updatePlayMode
   };
 });
