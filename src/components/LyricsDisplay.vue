@@ -11,7 +11,51 @@ const props = defineProps<{
 const lyricsContainer = ref<HTMLElement>();
 const currentLyricIndex = ref(-1);
 
-// 添加调试信息
+// 计算当前应该高亮的歌词行
+const currentLyric = computed(() => {
+  if (!props.lyrics || props.lyrics.length === 0) {
+    return null;
+  }
+
+  // 添加时间偏移量，让歌词提前显示（毫秒）
+  const LYRIC_OFFSET_MS = 1100; // 提前1100毫秒显示歌词
+  const currentTimeMs = props.currentTime * 1000 + LYRIC_OFFSET_MS; // 转换为毫秒并添加偏移
+  let index = -1;
+
+  console.log(`计算歌词高亮: 当前时间 ${props.currentTime}秒 + 偏移 ${LYRIC_OFFSET_MS}ms = ${currentTimeMs}ms`);
+
+  // 优化的歌词匹配逻辑
+  for (let i = 0; i < props.lyrics.length; i++) {
+    const currentLyricTime = props.lyrics[i].time;
+    const nextLyricTime = i < props.lyrics.length - 1 ? props.lyrics[i + 1].time : Infinity;
+    
+    console.log(`检查歌词 ${i}: ${currentLyricTime}ms - ${nextLyricTime}ms, 内容: "${props.lyrics[i].text}"`);
+    
+    // 如果当前时间在这一行歌词的时间范围内，就选择这一行
+    if (currentTimeMs >= currentLyricTime && currentTimeMs < nextLyricTime) {
+      index = i;
+      console.log(`✅ 找到匹配歌词: 索引 ${i}, 内容: "${props.lyrics[i].text}"`);
+      break;
+    }
+  }
+
+  // 如果没有找到匹配的歌词行，使用原来的逻辑作为兜底
+  if (index === -1) {
+    console.log('使用兜底逻辑');
+    for (let i = 0; i < props.lyrics.length; i++) {
+      if (currentTimeMs >= props.lyrics[i].time) {
+        index = i;
+      } else {
+        break;
+      }
+    }
+  }
+
+  console.log(`最终选择歌词索引: ${index}`);
+  return index >= 0 ? props.lyrics[index] : null;
+});
+
+// 添加调试信息 - 现在放在computed之后
 watch(() => props.lyrics, (newLyrics) => {
   console.log('歌词数据更新:', newLyrics);
   if (newLyrics && newLyrics.length > 0) {
@@ -24,24 +68,18 @@ watch(() => props.currentTime, (newTime) => {
   console.log('当前播放时间:', newTime, '秒');
 });
 
-// 计算当前应该高亮的歌词行
-const currentLyric = computed(() => {
-  if (!props.lyrics || props.lyrics.length === 0) {
-    return null;
-  }
+// 添加currentLyricIndex的调试监听
+watch(currentLyricIndex, (newIndex, oldIndex) => {
+  console.log(`歌词索引变化: ${oldIndex} -> ${newIndex}`);
+});
 
-  const currentTimeMs = props.currentTime * 1000; // 转换为毫秒
-  let index = -1;
-
-  for (let i = 0; i < props.lyrics.length; i++) {
-    if (currentTimeMs >= props.lyrics[i].time) {
-      index = i;
-    } else {
-      break;
-    }
-  }
-
-  return index >= 0 ? props.lyrics[index] : null;
+// 监听currentLyric变化的调试
+watch(currentLyric, (newLyric, oldLyric) => {
+  console.log('当前歌词变化:', {
+    old: oldLyric?.text,
+    new: newLyric?.text,
+    time: newLyric?.time
+  });
 });
 
 // 监听当前歌词变化，自动滚动到当前行
@@ -52,6 +90,7 @@ watch(currentLyric, async (newLyric) => {
   }
 
   const index = props.lyrics.findIndex(line => line.time === newLyric.time);
+  console.log(`设置当前歌词索引: ${index}, 歌词: "${newLyric.text}"`);
   currentLyricIndex.value = index;
 
   // 等待DOM更新后滚动
@@ -96,6 +135,7 @@ const formatTime = (timeMs: number) => {
 // 点击歌词行跳转到对应时间
 const seekToLyric = (line: LyricLine) => {
   const timeInSeconds = Math.floor(line.time / 1000);
+  console.log(`点击歌词跳转: "${line.text}" -> ${timeInSeconds}秒`);
   // 发射事件让父组件处理跳转
   emit('seek', timeInSeconds);
 };
