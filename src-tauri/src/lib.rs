@@ -134,18 +134,6 @@ async fn pause(_state: tauri::State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// 停止
-#[tauri::command]
-async fn stop(_state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let player_instance = get_player_instance().await?;
-    let player_state_guard = player_instance.lock().await;
-    player_state_guard
-        .player
-        .send_command(PlayerCommand::Stop)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// 下一曲
 #[tauri::command]
 async fn next(_state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -230,6 +218,18 @@ async fn set_play_mode(mode: PlayMode, _state: tauri::State<'_, AppState>) -> Re
     player_state_guard
         .player
         .send_command(PlayerCommand::SetPlayMode(mode))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 跳转到指定位置
+#[tauri::command]
+async fn seek_to(position: u64, _state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SeekTo(position))
         .await
         .map_err(|e| e.to_string())
 }
@@ -367,7 +367,6 @@ pub fn run() {
             get_play_mode,
             play,
             pause,
-            stop,
             next,
             previous,
             set_song,
@@ -375,6 +374,7 @@ pub fn run() {
             remove_song,
             clear_playlist,
             set_play_mode,
+            seek_to,
             open_audio_files,
             get_initial_player_state,
         ])

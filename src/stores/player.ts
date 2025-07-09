@@ -48,6 +48,17 @@ export const usePlayerStore = defineStore('player', () => {
   
   // 方法
   const play = async () => {
+    // 如果没有选中歌曲且播放列表不为空，自动选择第一首歌曲
+    if (currentIndex.value === null && playlist.value.length > 0) {
+      await setCurrentSong(0);
+    }
+    
+    // 如果还是没有歌曲可播放，直接返回
+    if (currentIndex.value === null || playlist.value.length === 0) {
+      console.warn('没有可播放的歌曲');
+      return;
+    }
+    
     await invoke('play');
     state.value = PlayerState.Playing;
   };
@@ -55,11 +66,6 @@ export const usePlayerStore = defineStore('player', () => {
   const pause = async () => {
     await invoke('pause');
     state.value = PlayerState.Paused;
-  };
-  
-  const stop = async () => {
-    await invoke('stop');
-    state.value = PlayerState.Stopped;
   };
   
   const next = async () => {
@@ -97,17 +103,43 @@ export const usePlayerStore = defineStore('player', () => {
   };  const openAudioFile = async () => {
     await invoke('open_audio_files');
   };
+
+  // 添加跳转功能
+  const seekTo = async (position: number) => {
+    try {
+      await invoke('seek_to', { position });
+      console.log('跳转到位置:', position, '秒');
+    } catch (error) {
+      console.error('跳转失败:', error);
+    }
+  };
   
   const updateProgress = (pos: number, dur: number) => {
     position.value = pos;
     duration.value = dur;
-  };  const updatePlaylist = (newPlaylist: SongInfo[]) => {
+  };
+
+  // 添加专门的进度重置方法
+  const resetProgress = () => {
+    position.value = 0;
+    duration.value = 0;
+  };
+
+  // 更新当前歌曲时自动重置进度
+  const updateCurrentSong = (index: number) => {
+    const oldIndex = currentIndex.value;
+    currentIndex.value = index;
+    
+    // 如果歌曲索引发生变化，重置进度条
+    if (oldIndex !== index) {
+      resetProgress();
+      console.log('歌曲索引变化，进度条重置:', index);
+    }
+  };
+
+  const updatePlaylist = (newPlaylist: SongInfo[]) => {
     // 清空现有播放列表并重新赋值以确保响应性
     playlist.value.splice(0, playlist.value.length, ...newPlaylist);
-  };
-  
-  const updateCurrentSong = (index: number) => {
-    currentIndex.value = index;
   };
   
   const updateState = (newState: PlayerState) => {
@@ -131,7 +163,6 @@ export const usePlayerStore = defineStore('player', () => {
     // 方法
     play,
     pause,
-    stop,
     next,
     previous,
     setCurrentSong,
@@ -140,6 +171,7 @@ export const usePlayerStore = defineStore('player', () => {
     clearPlaylist,
     setPlayMode,
     openAudioFile,
+    seekTo,
     updateProgress,
     updatePlaylist,
     updateCurrentSong,
