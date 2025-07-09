@@ -472,6 +472,7 @@ pub enum PlayerEvent {
 pub enum PlayerCommand {
     Play,
     Pause,
+    Stop,            // 添加 Stop 命令
     Next,
     Previous,
     SetSong(usize),

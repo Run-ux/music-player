@@ -125,23 +125,15 @@ const handlePrevious = () => {
 };
 
 const handleSelectSong = async (index: number) => {
-  try {
-    // 如果点击的是当前正在播放的歌曲，切换播放/暂停状态
-    if (playerStore.currentIndex === index && playerStore.isPlaying) {
-      await playerStore.pause();
-    } else if (playerStore.currentIndex === index && !playerStore.isPlaying) {
-      // 如果点击的是当前选中但未播放的歌曲，开始播放
-      await playerStore.play();
-    } else {
-      // 如果当前正在播放，先暂停
-      if (playerStore.isPlaying) {
-        await playerStore.pause();
-      }
-      // 设置当前歌曲，不自动播放
-      await playerStore.setCurrentSong(index);
-    }
-  } catch (error) {
-    console.error('选择歌曲失败:', error);
+  // 如果点击的是当前正在播放的歌曲，切换播放/暂停状态
+  if (playerStore.currentIndex === index && playerStore.isPlaying) {
+    await playerStore.pause();
+  } else {
+    // 设置当前歌曲
+    await playerStore.setCurrentSong(index);
+    
+    // 开始播放
+    await playerStore.play();
   }
 };
 

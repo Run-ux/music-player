@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import PlayModeControl from './PlayModeControl.vue';
 
 import { SongInfo } from '../stores/player';
 
@@ -48,10 +49,68 @@ const handleProgressClick = (event: MouseEvent) => {
   const progressWidth = rect.width;
   
   // 计算点击位置对应的时间
-  const clickPercent = clickX / progressWidth;
+  const clickPercent = Math.max(0, Math.min(1, clickX / progressWidth));
   const targetPosition = Math.floor(clickPercent * duration.value);
   
+  console.log(`进度条点击跳转: ${targetPosition}秒 (${(clickPercent * 100).toFixed(1)}%)`);
+  
+  // 立即更新前端显示，给用户即时反馈
+  position.value = targetPosition;
+  progress.value = clickPercent * 100;
+  
   // 调用跳转命令
+  seekTo(targetPosition);
+};
+
+// 进度条拖拽功能
+const isDragging = ref(false);
+const dragStartX = ref(0);
+const dragStartProgress = ref(0);
+
+const handleMouseDown = (event: MouseEvent) => {
+  if (!duration.value || !props.currentSong) return;
+  
+  isDragging.value = true;
+  dragStartX.value = event.clientX;
+  dragStartProgress.value = progress.value;
+  
+  // 阻止默认行为
+  event.preventDefault();
+  
+  // 添加全局鼠标事件监听器
+  document.addEventListener('mousemove', handleMouseMove);
+  document.addEventListener('mouseup', handleMouseUp);
+};
+
+const handleMouseMove = (event: MouseEvent) => {
+  if (!isDragging.value || !duration.value) return;
+  
+  const progressContainer = document.querySelector('.progress-container') as HTMLElement;
+  if (!progressContainer) return;
+  
+  const rect = progressContainer.getBoundingClientRect();
+  const currentX = event.clientX - rect.left;
+  const progressWidth = rect.width;
+  
+  // 计算新的进度百分比
+  const newPercent = Math.max(0, Math.min(100, (currentX / progressWidth) * 100));
+  
+  // 实时更新进度条显示
+  progress.value = newPercent;
+  position.value = Math.floor((newPercent / 100) * duration.value);
+};
+
+const handleMouseUp = (_event: MouseEvent) => {
+  if (!isDragging.value) return;
+  
+  isDragging.value = false;
+  
+  // 移除全局事件监听器
+  document.removeEventListener('mousemove', handleMouseMove);
+  document.removeEventListener('mouseup', handleMouseUp);
+  
+  // 执行跳转
+  const targetPosition = Math.floor((progress.value / 100) * duration.value);
   seekTo(targetPosition);
 };
 
@@ -131,7 +190,8 @@ watch(() => props.currentSong, (newSong, oldSong) => {
         <div 
           class="progress-handle" 
           :style="{ left: `${progress}%` }" 
-          :class="{ active: progress > 0 || isPlaying }"
+          :class="{ active: progress > 0 || isPlaying, dragging: isDragging }"
+          @mousedown="handleMouseDown"
           v-show="progress > 0"
         ></div>
       </div>
@@ -148,6 +208,11 @@ watch(() => props.currentSong, (newSong, oldSong) => {
       <button @click="handleNext" class="control-btn">
         <i class="icon-next">⏭</i>
       </button>
+    </div>
+    
+    <!-- 添加播放模式控制 -->
+    <div class="play-mode-section">
+      <PlayModeControl />
     </div>
   </div>
 </template>
@@ -225,11 +290,19 @@ watch(() => props.currentSong, (newSong, oldSong) => {
   transform: translate(-50%, -50%) scale(1.15); /* 缩小hover放大倍数 */
 }
 
+/* 添加拖拽状态样式 */
+.progress-handle.dragging {
+  cursor: grabbing;
+  background: #388e3c;
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
 .control-buttons {
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .control-btn {
@@ -260,5 +333,12 @@ watch(() => props.currentSong, (newSong, oldSong) => {
 
 .play:hover, .pause:hover {
   background-color: #d0f0d0;
+}
+
+.play-mode-section {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
 }
 </style>
