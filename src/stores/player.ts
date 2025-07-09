@@ -2,6 +2,11 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
+export interface LyricLine {
+  time: number;    // 时间戳（毫秒）
+  text: string;    // 歌词文本
+}
+
 export interface SongInfo {
   path: string;
   title?: string;
@@ -9,6 +14,7 @@ export interface SongInfo {
   album?: string;
   albumCover?: string;
   duration?: number;
+  lyrics?: LyricLine[];  // 歌词信息
 }
 
 export enum PlayerState {

@@ -55,6 +55,13 @@ pub enum PlayerState {
     Stopped,
 }
 
+/// 歌词行结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LyricLine {
+    pub time: u64,      // 时间戳（毫秒）
+    pub text: String,   // 歌词文本
+}
+
 /// 歌曲信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongInfo {
@@ -65,36 +72,229 @@ pub struct SongInfo {
     #[serde(rename = "albumCover")]
     pub album_cover: Option<String>,
     pub duration: Option<u64>, // 单位：秒
+    pub lyrics: Option<Vec<LyricLine>>, // 歌词信息
 }
 
-impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策略
+impl SongInfo {
+    /// 从文件路径创建歌曲信息 - 使用四重兜底策略
     pub fn from_path(path: &Path) -> Result<Self> {
         let path_str = path.to_string_lossy().into_owned();
         println!("正在解析音频文件: {}", path.display());
         
         // 策略1: 使用 lofty 库（最强大的通用库）
-        if let Some(song_info) = Self::try_lofty_extraction(path) {
+        if let Some(mut song_info) = Self::try_lofty_extraction(path) {
             println!("✅ 使用 lofty 库成功提取元数据");
+            // 尝试加载歌词
+            song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
         }
         
         // 策略2: 使用 audiotags 库
-        if let Some(song_info) = Self::try_audiotags_extraction(path) {
+        if let Some(mut song_info) = Self::try_audiotags_extraction(path) {
             println!("✅ 使用 audiotags 库成功提取元数据");
+            // 尝试加载歌词
+            song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
         }
         
         // 策略3: 使用格式特定的方法（原有的 ID3/FLAC/OGG 方法）
-        if let Some(song_info) = Self::try_format_specific_extraction(path) {
+        if let Some(mut song_info) = Self::try_format_specific_extraction(path) {
             println!("✅ 使用格式特定方法成功提取元数据");
+            // 尝试加载歌词
+            song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
         }
         
         // 策略4: 兜底方案，使用文件名作为标题
         println!("⚠️  所有元数据提取方法都失败，使用兜底方案");
-        let song_info = Self::create_fallback_song_info(path);
+        let mut song_info = Self::create_fallback_song_info(path);
+        // 尝试加载歌词
+        song_info.lyrics = Self::load_lyrics(path);
         Ok(song_info)
-    }    /// 策略1: 使用 lofty 库提取元数据和封面
+    }
+
+    /// 加载歌词文件
+    fn load_lyrics(audio_path: &Path) -> Option<Vec<LyricLine>> {
+        let audio_dir = audio_path.parent()?;
+        let audio_stem = audio_path.file_stem()?.to_str()?;
+        
+        // 可能的歌词文件扩展名
+        let lyric_extensions = ["lrc", "txt"];
+        
+        for ext in &lyric_extensions {
+            let lyric_path = audio_dir.join(format!("{}.{}", audio_stem, ext));
+            
+            if lyric_path.exists() {
+                println!("找到歌词文件: {}", lyric_path.display());
+                
+                match ext {
+                    &"lrc" => {
+                        if let Some(lyrics) = Self::parse_lrc_file(&lyric_path) {
+                            return Some(lyrics);
+                        }
+                    }
+                    &"txt" => {
+                        if let Some(lyrics) = Self::parse_txt_file(&lyric_path) {
+                            return Some(lyrics);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        println!("未找到歌词文件: {}", audio_stem);
+        None
+    }
+
+    /// 解析LRC格式歌词文件
+    fn parse_lrc_file(lrc_path: &Path) -> Option<Vec<LyricLine>> {
+        use std::io::{BufRead, BufReader};
+        
+        // 尝试多种编码方式读取文件
+        let content = Self::read_file_with_encoding(lrc_path)?;
+        
+        let mut lyrics = Vec::new();
+        
+        for line_content in content.lines() {
+            let line_content = line_content.trim();
+            
+            // 跳过空行和标签行（如[ar:], [ti:], [al:]等）
+            if line_content.is_empty() || 
+               (line_content.starts_with('[') && 
+                (line_content.contains("ar:") || line_content.contains("ti:") || 
+                 line_content.contains("al:") || line_content.contains("by:") ||
+                 line_content.contains("offset:"))) {
+                continue;
+            }
+            
+            // 解析时间标签格式：[mm:ss.xx]歌词内容
+            if let Some(lyric_line) = Self::parse_lrc_line(line_content) {
+                lyrics.push(lyric_line);
+            }
+        }
+        
+        // 按时间排序
+        lyrics.sort_by_key(|line| line.time);
+        
+        if lyrics.is_empty() {
+            None
+        } else {
+            println!("成功解析歌词，共{}行", lyrics.len());
+            Some(lyrics)
+        }
+    }
+
+    /// 解析单行LRC歌词
+    fn parse_lrc_line(line: &str) -> Option<LyricLine> {
+        // 正则表达式匹配 [mm:ss.xx] 格式
+        if !line.starts_with('[') {
+            return None;
+        }
+        
+        let end_bracket = line.find(']')?;
+        let time_str = &line[1..end_bracket];
+        let text = line[end_bracket + 1..].trim().to_string();
+        
+        // 解析时间 mm:ss.xx
+        let parts: Vec<&str> = time_str.split(':').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        
+        let minutes: u64 = parts[0].parse().ok()?;
+        let seconds_parts: Vec<&str> = parts[1].split('.').collect();
+        
+        let seconds: u64 = seconds_parts[0].parse().ok()?;
+        let milliseconds: u64 = if seconds_parts.len() > 1 {
+            // 处理毫秒部分，确保是两位数
+            let ms_str = seconds_parts[1];
+            let ms_str = if ms_str.len() == 1 {
+                format!("{}0", ms_str)
+            } else if ms_str.len() > 2 {
+                ms_str[..2].to_string()
+            } else {
+                ms_str.to_string()
+            };
+            ms_str.parse().unwrap_or(0) * 10 // 转换为毫秒
+        } else {
+            0
+        };
+        
+        let total_milliseconds = minutes * 60 * 1000 + seconds * 1000 + milliseconds;
+        
+        Some(LyricLine {
+            time: total_milliseconds,
+            text,
+        })
+    }
+
+    /// 解析普通文本格式歌词文件
+    fn parse_txt_file(txt_path: &Path) -> Option<Vec<LyricLine>> {
+        let content = Self::read_file_with_encoding(txt_path)?;
+        
+        let mut lyrics = Vec::new();
+        let mut time_offset = 0u64;
+        
+        for line_content in content.lines() {
+            let line_content = line_content.trim();
+            
+            if !line_content.is_empty() {
+                lyrics.push(LyricLine {
+                    time: time_offset,
+                    text: line_content.to_string(),
+                });
+                
+                // 每行间隔3秒（估算）
+                time_offset += 3000;
+            }
+        }
+        
+        if lyrics.is_empty() {
+            None
+        } else {
+            Some(lyrics)
+        }
+    }
+
+    /// 使用多种编码方式读取文件内容
+    fn read_file_with_encoding(file_path: &Path) -> Option<String> {
+        // 首先尝试UTF-8编码
+        if let Ok(content) = std::fs::read_to_string(file_path) {
+            // 检查是否包含无效字符（乱码的迹象）
+            if !content.contains('�') {
+                println!("使用UTF-8编码成功读取歌词文件");
+                return Some(content);
+            }
+        }
+        
+        // 如果UTF-8失败或包含乱码，尝试GBK编码
+        if let Ok(bytes) = std::fs::read(file_path) {
+            // 尝试使用encoding_rs库进行GBK解码
+            let (decoded, _, had_errors) = encoding_rs::GBK.decode(&bytes);
+            if !had_errors {
+                println!("使用GBK编码成功读取歌词文件");
+                return Some(decoded.into_owned());
+            }
+            
+            // 如果GBK也失败，尝试GB2312
+            let (decoded, _, had_errors) = encoding_rs::GB18030.decode(&bytes);
+            if !had_errors {
+                println!("使用GB18030编码成功读取歌词文件");
+                return Some(decoded.into_owned());
+            }
+            
+            // 最后尝试Windows-1252（西欧编码）
+            let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(&bytes);
+            println!("使用Windows-1252编码读取歌词文件（可能有问题）");
+            return Some(decoded.into_owned());
+        }
+        
+        println!("所有编码方式都失败，无法读取歌词文件");
+        None
+    }
+
+    /// 策略1: 使用 lofty 库提取元数据和封面
     fn try_lofty_extraction(path: &Path) -> Option<SongInfo> {
         match Probe::open(path).and_then(|probe| probe.read()) {
             Ok(tagged_file) => {
@@ -124,6 +324,7 @@ impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策
                     album,
                     album_cover,
                     duration,
+                    lyrics: None, // 默认没有歌词
                 })
             }
             Err(e) => {
@@ -179,6 +380,7 @@ impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策
                     album,
                     album_cover,
                     duration,
+                    lyrics: None, // 默认没有歌词
                 })
             }
             Err(e) => {
@@ -188,8 +390,6 @@ impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策
         }
     }    /// 策略3: 使用格式特定的方法（原有方法）
     fn try_format_specific_extraction(path: &Path) -> Option<SongInfo> {
-        let path_str = path.to_string_lossy().into_owned();
-        
         match Tag::read_from_path(path) {
             Ok(tag) => {
                 // 提取专辑封面
@@ -202,12 +402,13 @@ impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策
                     tag.title(), tag.artist(), album_cover.is_some());
 
                 Some(SongInfo {
-                    path: path_str,
+                    path: path.to_string_lossy().into_owned(),
                     title: tag.title().map(|s| s.to_string()),
                     artist: tag.artist().map(|s| s.to_string()),
                     album: tag.album().map(|s| s.to_string()),
                     album_cover,
                     duration,
+                    lyrics: None, // 默认没有歌词
                 })
             }
             Err(e) => {
@@ -235,6 +436,7 @@ impl SongInfo {    /// 从文件路径创建歌曲信息 - 使用四重兜底策
             album: None,
             album_cover: Self::get_default_album_cover(),
             duration,
+            lyrics: None, // 兜底方案没有歌词
         }
     }    /// 从 lofty 提取封面
     fn extract_cover_from_lofty(tagged_file: &lofty::TaggedFile) -> Option<String> {
