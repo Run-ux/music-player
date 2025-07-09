@@ -6,6 +6,7 @@ import { usePlayerStore, PlayerState, SongInfo } from "./stores/player";
 import PlayerControls from "./components/PlayerControls.vue";
 import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
+import LyricsDisplay from "./components/LyricsDisplay.vue";
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
@@ -141,6 +142,11 @@ const handleRemoveSong = (index: number) => {
   playerStore.removeSong(index);
 };
 
+// 歌词跳转处理
+const handleLyricsSeek = (time: number) => {
+  playerStore.seekTo(time);
+};
+
 // 组件挂载时初始化
 onMounted(() => {
   initPlayer();
@@ -173,6 +179,15 @@ onMounted(() => {
           @pause="handlePause"
           @next="handleNext"
           @previous="handlePrevious"
+        />
+      </div>
+      
+      <div class="center-panel">
+        <LyricsDisplay
+          :lyrics="playerStore.currentSong?.lyrics"
+          :current-time="playerStore.position"
+          :is-playing="playerStore.isPlaying"
+          @seek="handleLyricsSeek"
         />
       </div>
       
@@ -225,25 +240,51 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  overflow-y: auto;
+  min-width: 300px;
+}
+
+.center-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+  max-width: 500px;
 }
 
 .right-panel {
   flex: 1;
-  overflow: hidden;
-  max-width: 400px;
+  min-width: 300px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .app-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  
+  .left-panel,
+  .center-panel,
+  .right-panel {
+    min-width: unset;
+    max-width: unset;
+  }
+  
+  .center-panel {
+    min-height: 300px;
+  }
 }
 
 @media (max-width: 768px) {
   .app-content {
-    flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.5rem;
   }
   
-  .right-panel {
-    max-width: none;
+  .center-panel {
+    min-height: 250px;
   }
 }
-
 </style>
 <style>
 :root {
