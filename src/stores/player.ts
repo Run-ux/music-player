@@ -7,6 +7,12 @@ export interface LyricLine {
   text: string;    // 歌词文本
 }
 
+// 新增：媒体类型枚举
+export enum MediaType {
+  Audio = 'Audio',
+  Video = 'Video'
+}
+
 export interface SongInfo {
   path: string;
   title?: string;
@@ -15,6 +21,11 @@ export interface SongInfo {
   albumCover?: string;
   duration?: number;
   lyrics?: LyricLine[];  // 歌词信息
+  // 新增：MV相关字段
+  mediaType?: MediaType;  // 媒体类型
+  mvPath?: string;        // MV视频文件路径
+  videoThumbnail?: string; // 视频缩略图
+  hasLyrics?: boolean;    // 是否有歌词
 }
 
 export enum PlayerState {
@@ -157,7 +168,6 @@ export const usePlayerStore = defineStore('player', () => {
   
   const updateProgress = (pos: number, dur: number) => {
     const now = Date.now();
-    const previousPosition = position.value;
     
     position.value = pos;
     duration.value = dur;

@@ -85,8 +85,12 @@ const formatDuration = (seconds: number | undefined) => {
             <span v-else class="song-number">{{ index + 1 }}</span>
           </div>
           <div class="song-info">
-            <div class="song-title">{{ song.title || '未知歌曲' }}</div>
-            <div class="song-artist">{{ song.artist || '未知艺术家' }}</div>
+            <div class="song-title">
+              <span class="media-type-icon" v-if="song.mediaType === 'Video'">🎬</span>
+              <span class="media-type-icon" v-else>🎵</span>
+              {{ song.title || '未知歌曲' }}
+            </div>
+            <div class="song-artist">{{ song.artist || (song.mediaType === 'Video' ? '视频文件' : '未知艺术家') }}</div>
           </div>
           <div class="song-meta">
             <span class="song-duration">{{ formatDuration(song.duration) }}</span>
@@ -232,6 +236,14 @@ const formatDuration = (seconds: number | undefined) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.media-type-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
 }
 
 .song-artist {

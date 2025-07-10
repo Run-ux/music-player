@@ -195,9 +195,7 @@ fn run_player_thread(
                                                             player_state_guard.state = PlayerState::Playing;
                                                             
                                                             // 重置播放进度追踪变量
-                                                            current_position = 0;
                                                             paused_position = 0;
-                                                            play_start_time = Some(std::time::Instant::now());
                                                             
                                                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
@@ -232,6 +230,7 @@ fn run_player_thread(
                                 sink.pause();
                                 player_state_guard.state = PlayerState::Paused;
                                 
+
                                 // 保存当前播放位置用于恢复播放
                                 if let Some(start_time) = play_start_time {
                                     paused_position = start_time.elapsed().as_secs();
@@ -311,13 +310,12 @@ fn run_player_thread(
                                             player_state_guard.state = PlayerState::Playing;
                                             
                                             // 重置播放进度追踪变量
-                                            current_position = 0;
                                             paused_position = 0;
-                                            play_start_time = Some(std::time::Instant::now());
                                             
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                             let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(new_index, song.clone()));
                                                 
+
                                             // 立即发送初始进度更新事件，确保前端进度条重置
                                             if let Some(duration) = song.duration {
                                                 let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
@@ -520,10 +518,6 @@ fn run_player_thread(
                                                                 // 如果跳转位置大于0，尝试跳过指定时长
                                                                 if seek_position > 0 {
                                                                     let skip_duration = std::time::Duration::from_secs(seek_position);
-                                                                    
-                                                                    // 使用更精确的跳转方法
-                                                                    let mut samples_to_skip = skip_duration.as_secs_f64() * source.sample_rate() as f64;
-                                                                    samples_to_skip *= source.channels() as f64;
                                                                     
                                                                     // 尝试跳过指定的采样数
                                                                     let skipped_source = source.skip_duration(skip_duration);
