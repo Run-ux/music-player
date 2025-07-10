@@ -6,6 +6,8 @@ import { usePlayerStore, PlayerState, SongInfo } from "./stores/player";
 import PlayerControls from "./components/PlayerControls.vue";
 import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
+import LyricsDisplay from "./components/LyricsDisplay.vue";
+import VideoPlayer from "./components/VideoPlayer.vue";
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
@@ -51,6 +53,8 @@ const initPlayer = async () => {
             
           case 'SongChanged':
             playerStore.updateCurrentSong(payload.data[0]);
+            // 切换歌曲时重置进度条
+            playerStore.updateProgress(0, payload.data[1]?.duration || 0);
             break;
               case 'PlaylistUpdated':
             if (Array.isArray(payload.data)) {
@@ -82,6 +86,8 @@ const initPlayer = async () => {
 
         if (payload.SongChanged) {
           playerStore.updateCurrentSong(payload.SongChanged[0]);
+          // 切换歌曲时重置进度条
+          playerStore.updateProgress(0, payload.SongChanged[1]?.duration || 0);
         }
           if (payload.PlaylistUpdated) {
           playerStore.updatePlaylist(payload.PlaylistUpdated);
@@ -112,10 +118,6 @@ const handlePause = () => {
   playerStore.pause();
 };
 
-const handleStop = () => {
-  playerStore.stop();
-};
-
 const handleNext = () => {
   playerStore.next();
 };
@@ -124,12 +126,26 @@ const handlePrevious = () => {
   playerStore.previous();
 };
 
-const handleSelectSong = (index: number) => {
-  playerStore.setCurrentSong(index);
+const handleSelectSong = async (index: number) => {
+  // 如果点击的是当前正在播放的歌曲，切换播放/暂停状态
+  if (playerStore.currentIndex === index && playerStore.isPlaying) {
+    await playerStore.pause();
+  } else {
+    // 设置当前歌曲
+    await playerStore.setCurrentSong(index);
+    
+    // 开始播放
+    await playerStore.play();
+  }
 };
 
 const handleRemoveSong = (index: number) => {
   playerStore.removeSong(index);
+};
+
+// 歌词跳转处理
+const handleLyricsSeek = (time: number) => {
+  playerStore.seekTo(time);
 };
 
 // 组件挂载时初始化
@@ -162,9 +178,24 @@ onMounted(() => {
           :is-playing="playerStore.isPlaying"
           @play="handlePlay"
           @pause="handlePause"
-          @stop="handleStop"
           @next="handleNext"
           @previous="handlePrevious"
+        />
+      </div>
+      
+      <div class="center-panel">
+        <!-- 根据媒体类型显示不同组件 -->
+        <VideoPlayer
+          v-if="playerStore.currentSong?.mediaType === 'Video'"
+          :song="playerStore.currentSong"
+          :is-playing="playerStore.isPlaying"
+        />
+        <LyricsDisplay
+          v-else
+          :lyrics="playerStore.currentSong?.lyrics"
+          :current-time="playerStore.position"
+          :is-playing="playerStore.isPlaying"
+          @seek="handleLyricsSeek"
         />
       </div>
       
@@ -172,6 +203,7 @@ onMounted(() => {
         <Playlist 
           :playlist="playerStore.playlist" 
           :current-index="playerStore.currentIndex"
+          :is-playing="playerStore.isPlaying"
           @select-song="handleSelectSong"
           @remove-song="handleRemoveSong"
         />
@@ -216,25 +248,51 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  overflow-y: auto;
+  min-width: 300px;
+}
+
+.center-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+  max-width: 500px;
 }
 
 .right-panel {
   flex: 1;
-  overflow: hidden;
-  max-width: 400px;
+  min-width: 300px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .app-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  
+  .left-panel,
+  .center-panel,
+  .right-panel {
+    min-width: unset;
+    max-width: unset;
+  }
+  
+  .center-panel {
+    min-height: 300px;
+  }
 }
 
 @media (max-width: 768px) {
   .app-content {
-    flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.5rem;
   }
   
-  .right-panel {
-    max-width: none;
+  .center-panel {
+    min-height: 250px;
   }
 }
-
 </style>
 <style>
 :root {

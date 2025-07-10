@@ -7,6 +7,7 @@ import { SongInfo } from '../stores/player';
 const props = defineProps<{
   playlist: SongInfo[];
   currentIndex: number | null;
+  isPlaying: boolean;
 }>();
 
 // 使用计算属性，确保TypeScript知道props被使用
@@ -73,9 +74,23 @@ const formatDuration = (seconds: number | undefined) => {
           :class="{ 'current-song': index === currentIndex }"
           @click="handleSelectSong(index)"
         >
+          <div class="song-status">
+            <span 
+              v-if="index === currentIndex" 
+              class="play-indicator"
+              :class="{ playing: isPlaying }"
+            >
+              {{ isPlaying ? '▶' : '⏸' }}
+            </span>
+            <span v-else class="song-number">{{ index + 1 }}</span>
+          </div>
           <div class="song-info">
-            <div class="song-title">{{ song.title || '未知歌曲' }}</div>
-            <div class="song-artist">{{ song.artist || '未知艺术家' }}</div>
+            <div class="song-title">
+              <span class="media-type-icon" v-if="song.mediaType === 'Video'">🎬</span>
+              <span class="media-type-icon" v-else>🎵</span>
+              {{ song.title || '未知歌曲' }}
+            </div>
+            <div class="song-artist">{{ song.artist || (song.mediaType === 'Video' ? '视频文件' : '未知艺术家') }}</div>
           </div>
           <div class="song-meta">
             <span class="song-duration">{{ formatDuration(song.duration) }}</span>
@@ -164,12 +179,12 @@ const formatDuration = (seconds: number | undefined) => {
 
 .song-list li {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
+  gap: 0.75rem;
 }
 
 .song-list li:hover {
@@ -181,9 +196,38 @@ const formatDuration = (seconds: number | undefined) => {
   border-left: 3px solid #4caf50;
 }
 
+.song-status {
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.song-number {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.play-indicator {
+  font-size: 0.8rem;
+  color: #4caf50;
+  animation: pulse 2s infinite;
+}
+
+.play-indicator.playing {
+  color: #4caf50;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .song-info {
   flex: 1;
   overflow: hidden;
+  min-width: 0;
 }
 
 .song-title {
@@ -192,6 +236,14 @@ const formatDuration = (seconds: number | undefined) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.media-type-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
 }
 
 .song-artist {
@@ -206,6 +258,7 @@ const formatDuration = (seconds: number | undefined) => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .song-duration {

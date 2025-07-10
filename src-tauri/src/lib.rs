@@ -134,18 +134,6 @@ async fn pause(_state: tauri::State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// 停止
-#[tauri::command]
-async fn stop(_state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let player_instance = get_player_instance().await?;
-    let player_state_guard = player_instance.lock().await;
-    player_state_guard
-        .player
-        .send_command(PlayerCommand::Stop)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// 下一曲
 #[tauri::command]
 async fn next(_state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -234,7 +222,19 @@ async fn set_play_mode(mode: PlayMode, _state: tauri::State<'_, AppState>) -> Re
         .map_err(|e| e.to_string())
 }
 
-/// 打开文件对话框添加歌曲 - 简化版本直接使用 GlobalPlayer
+/// 跳转到指定位置
+#[tauri::command]
+async fn seek_to(position: u64, _state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SeekTo(position))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 打开文件对话框添加歌曲 - 扩展为支持音频和视频文件
 #[tauri::command]
 async fn open_audio_files<R: Runtime>(
     app_handle: AppHandle<R>,
@@ -271,8 +271,10 @@ async fn open_audio_files<R: Runtime>(
         app_handle_clone
             .dialog()
             .file()
-            .add_filter("Audio", &["mp3", "wav", "ogg", "flac"])
-            .set_title("选择音频文件")
+            .add_filter("音频文件", &["mp3", "wav", "ogg", "flac", "m4a", "aac"])
+            .add_filter("视频文件", &["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v"])
+            .add_filter("所有媒体文件", &["mp3", "wav", "ogg", "flac", "m4a", "aac", "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v"])
+            .set_title("选择音频或视频文件")
             .pick_files(move |file_paths| {
                 if let Some(paths) = file_paths {
                     if paths.is_empty() {
@@ -288,10 +290,10 @@ async fn open_audio_files<R: Runtime>(
                                 songs_to_add.push(song_info);
                             }
                             Err(e) => {
-                                eprintln!("处理歌曲失败 {}: {}", path_str, e);
+                                eprintln!("处理媒体文件失败 {}: {}", path_str, e);
                             }
                         }
-                    } // 如果有有效的歌曲，添加到播放器
+                    } // 如果有有效的媒体文件，添加到播放器
                     if !songs_to_add.is_empty() {
                         tauri::async_runtime::block_on(async {
                             let player_guard = player_clone.lock().await;
@@ -315,9 +317,9 @@ async fn open_audio_files<R: Runtime>(
                                     );
                                 }
                                 Err(e) => {
-                                    eprintln!("添加歌曲失败: {}", e);
+                                    eprintln!("添加媒体文件失败: {}", e);
                                     let _ = app_handle_clone
-                                        .emit("player_error", format!("添加歌曲失败: {}", e));
+                                        .emit("player_error", format!("添加媒体文件失败: {}", e));
                                 }
                             }
                         });
@@ -326,6 +328,29 @@ async fn open_audio_files<R: Runtime>(
             });
     });
     Ok(())
+}
+
+/// 获取视频流数据 - 用于前端播放视频
+#[tauri::command]
+async fn get_video_stream(file_path: String) -> Result<Vec<u8>, String> {
+    println!("开始读取视频文件: {}", file_path);
+    
+    // 检查文件是否存在
+    if !std::path::Path::new(&file_path).exists() {
+        return Err(format!("视频文件不存在: {}", file_path));
+    }
+    
+    // 读取视频文件
+    match std::fs::read(&file_path) {
+        Ok(data) => {
+            println!("成功读取视频文件，大小: {} 字节", data.len());
+            Ok(data)
+        }
+        Err(e) => {
+            eprintln!("读取视频文件失败: {}", e);
+            Err(format!("读取视频文件失败: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -367,7 +392,6 @@ pub fn run() {
             get_play_mode,
             play,
             pause,
-            stop,
             next,
             previous,
             set_song,
@@ -375,8 +399,10 @@ pub fn run() {
             remove_song,
             clear_playlist,
             set_play_mode,
+            seek_to,
             open_audio_files,
             get_initial_player_state,
+            get_video_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
