@@ -108,16 +108,43 @@ const handleVideoError = (event: Event) => {
   isVideoPlaying.value = false;
 };
 
+// 新增：直接向后端发送进度更新的函数
+const sendProgressToBackend = async (position: number, duration: number) => {
+  try {
+    // 通过 invoke 调用后端接口发送进度更新
+    await invoke('update_video_progress', { 
+      position: Math.floor(position), 
+      duration: Math.floor(duration) 
+    });
+  } catch (error) {
+    console.error('发送视频进度失败:', error);
+  }
+};
+
 // 处理视频时间更新 - 同步到主播放器进度
 const handleTimeUpdate = () => {
-  if (videoElement.value && props.song?.duration) {
+  if (videoElement.value && props.song?.duration && isVideoLoaded.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
     const duration = Math.floor(videoElement.value.duration) || props.song.duration;
     
-    // 同步到主播放器进度，实现统一进度显示
-    playerStore.updateProgress(currentTime, duration);
+    // 只有在视频真正播放时才更新进度（避免拖拽干扰）
+    if (!videoElement.value.paused && isVideoPlaying.value) {
+      // 同步到主播放器进度，实现统一进度显示
+      playerStore.updateProgress(currentTime, duration);
+      // 同时发送到后端，确保后端状态同步
+      sendProgressToBackend(currentTime, duration);
+      
+      // 减少日志输出频率，只在整秒变化时输出
+      if (currentTime !== lastLoggedTime.value) {
+        console.log('视频进度同步:', currentTime, '/', duration);
+        lastLoggedTime.value = currentTime;
+      }
+    }
   }
 };
+
+// 添加日志控制变量
+const lastLoggedTime = ref(-1);
 
 // 监听主播放器的跳转命令 - 实现统一进度控制
 watch(() => playerStore.position, (newPosition, oldPosition) => {
@@ -128,6 +155,17 @@ watch(() => playerStore.position, (newPosition, oldPosition) => {
     videoElement.value.currentTime = newPosition;
   }
 });
+
+// 新增：监听视频跳转事件，同步进度
+const handleVideoSeek = () => {
+  if (videoElement.value && props.song?.duration) {
+    const currentTime = Math.floor(videoElement.value.currentTime);
+    const duration = Math.floor(videoElement.value.duration) || props.song.duration;
+    
+    console.log('视频手动跳转，同步进度:', currentTime);
+    playerStore.updateProgress(currentTime, duration);
+  }
+};
 
 // 处理视频播放/暂停状态变化
 const handleVideoPlay = () => {
@@ -190,6 +228,7 @@ onUnmounted(() => {
         @loadedmetadata="handleVideoLoadedMetadata"
         @error="handleVideoError"
         @timeupdate="handleTimeUpdate"
+        @seeked="handleVideoSeek"
         @play="handleVideoPlay"
         @pause="handleVideoPause"
         @ended="handleVideoEnded"

@@ -872,4 +872,5 @@ pub enum PlayerCommand {
     SetPlayMode(PlayMode),
     SetVolume(f32),
     SeekTo(u64),
+    UpdateVideoProgress { position: u64, duration: u64 },
 }

@@ -144,7 +144,19 @@ fn run_player_thread(
                         PlayerCommand::Play => {
                             match player_state_guard.state {
                                 PlayerState::Paused => {
-                                    if let Some(sink) = &current_sink {
+                                    // 检查当前歌曲是否为视频
+                                    let is_video = if let Some(idx) = player_state_guard.current_index {
+                                        if let Some(song) = player_state_guard.playlist.get(idx) {
+                                            song.media_type == Some(crate::player_fixed::MediaType::Video)
+                                        } else { false }
+                                    } else { false };
+
+                                    if is_video {
+                                        // 视频文件：只更新状态，不操作rodio sink
+                                        player_state_guard.state = PlayerState::Playing;
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                                    } else if let Some(sink) = &current_sink {
+                                        // 音频文件：正常处理
                                         sink.play();
                                         player_state_guard.state = PlayerState::Playing;
                                         
@@ -168,65 +180,96 @@ fn run_player_thread(
 
                                     let song = player_state_guard.playlist[index].clone();
                                     
+                                    // 检查是否为视频文件
+                                    let is_video = song.media_type == Some(crate::player_fixed::MediaType::Video);
+                                    
                                     // 重置播放进度
                                     current_position = 0;
                                     paused_position = 0;
                                     
-                                    drop(player_state_guard); // Release lock before IO
+                                    if is_video {
+                                        // 视频文件：不使用rodio，只更新状态
+                                        player_state_guard.state = PlayerState::Playing;
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
+                                        
+                                        // 发送初始进度更新
+                                        if let Some(duration) = song.duration {
+                                            let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                position: 0, 
+                                                duration 
+                                            });
+                                        }
+                                    } else {
+                                        // 音频文件：正常的rodio处理逻辑
+                                        drop(player_state_guard); // Release lock before IO
 
-                                    match std::fs::File::open(&song.path) {
-                                        Ok(file) => {
-                                            match rodio::Decoder::new(std::io::BufReader::new(file)) {
-                                                Ok(source) => {
-                                                    if let Some(sink) = current_sink.take() { 
-                                                        sink.stop();
-                                                    }
-                                                    match rodio::Sink::try_new(&stream_handle) {
-                                                        Ok(sink) => {
-                                                            sink.append(source);
-                                                            sink.play();
-                                                            current_sink = Some(sink);
+                                        match std::fs::File::open(&song.path) {
+                                            Ok(file) => {
+                                                match rodio::Decoder::new(std::io::BufReader::new(file)) {
+                                                    Ok(source) => {
+                                                        if let Some(sink) = current_sink.take() { 
+                                                            sink.stop();
+                                                        }
+                                                        match rodio::Sink::try_new(&stream_handle) {
+                                                            Ok(sink) => {
+                                                                sink.append(source);
+                                                                sink.play();
+                                                                current_sink = Some(sink);
 
-                                                            // 重置播放进度和开始时间
-                                                            current_position = 0;
-                                                            play_start_time = Some(std::time::Instant::now());
+                                                                // 重置播放进度和开始时间
+                                                                current_position = 0;
+                                                                play_start_time = Some(std::time::Instant::now());
 
-                                                            let mut player_state_guard = state.lock().unwrap(); 
-                                                            player_state_guard.state = PlayerState::Playing;
-                                                            
-                                                            // 重置播放进度追踪变量
-                                                            paused_position = 0;
-                                                            
-                                                            let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
-                                                            let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
-                                                            
-                                                            // 立即发送初始进度更新事件，确保前端进度条重置
-                                                            if let Some(duration) = song.duration {
-                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
-                                                                    position: 0, 
-                                                                    duration 
-                                                                });
+                                                                let mut player_state_guard = state.lock().unwrap(); 
+                                                                player_state_guard.state = PlayerState::Playing;
+                                                                
+                                                                // 重置播放进度追踪变量
+                                                                paused_position = 0;
+                                                                
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::SongChanged(index, song.clone()));
+                                                                
+                                                                // 立即发送初始进度更新事件，确保前端进度条重置
+                                                                if let Some(duration) = song.duration {
+                                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                                        position: 0, 
+                                                                        duration 
+                                                                    });
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e)));
                                                             }
                                                         }
-                                                        Err(e) => {
-                                                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法创建音频sink: {}", e)));
-                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("解码音频文件失败: {}", e)));
                                                     }
                                                 }
-                                                Err(e) => {
-                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("解码音频文件失败: {}", e)));
-                                                }
                                             }
-                                        }
-                                        Err(e) => {
-                                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e)));
+                                            Err(e) => {
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e)));
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                         PlayerCommand::Pause => {
-                            if let Some(sink) = &current_sink {
+                            // 检查当前歌曲是否为视频
+                            let is_video = if let Some(idx) = player_state_guard.current_index {
+                                if let Some(song) = player_state_guard.playlist.get(idx) {
+                                    song.media_type == Some(crate::player_fixed::MediaType::Video)
+                                } else { false }
+                            } else { false };
+
+                            if is_video {
+                                // 视频文件：只更新状态，不操作rodio sink
+                                player_state_guard.state = PlayerState::Paused;
+                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
+                            } else if let Some(sink) = &current_sink {
+                                // 音频文件：正常处理
                                 sink.pause();
                                 player_state_guard.state = PlayerState::Paused;
                                 
@@ -586,6 +629,21 @@ fn run_player_thread(
                                 }
                             } else {
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::Error("无法跳转：没有选中的歌曲".to_string()));
+                            }
+                        }
+                        PlayerCommand::UpdateVideoProgress { position, duration } => {
+                            // 处理视频进度更新命令
+                            if let Some(current_idx) = player_state_guard.current_index {
+                                if let Some(song) = player_state_guard.playlist.get(current_idx) {
+                                    // 只有当前播放的是视频文件时才处理
+                                    if song.media_type == Some(crate::player_fixed::MediaType::Video) {
+                                        // 直接发送进度更新事件
+                                        let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                            position, 
+                                            duration 
+                                        });
+                                    }
+                                }
                             }
                         }
                     }

@@ -403,7 +403,34 @@ pub fn run() {
             open_audio_files,
             get_initial_player_state,
             get_video_stream,
+            update_video_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 更新视频播放进度 - 专门用于视频文件的进度同步
+#[tauri::command]
+async fn update_video_progress(position: u64, duration: u64, _state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    
+    // 直接发送进度更新事件，不通过播放器命令队列
+    if let Some(current_idx) = player_state_guard.player.get_current_index() {
+        let playlist = player_state_guard.player.get_playlist();
+        if let Some(song) = playlist.get(current_idx) {
+            // 只有当前播放的是视频文件时才处理
+            if song.media_type == Some(crate::player_fixed::MediaType::Video) {
+                // 这里我们需要直接访问事件发送器来发送进度更新
+                // 由于架构限制，我们通过特殊的命令来处理视频进度
+                player_state_guard
+                    .player
+                    .send_command(PlayerCommand::UpdateVideoProgress { position, duration })
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    
+    Ok(())
 }

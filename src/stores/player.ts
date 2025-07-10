@@ -181,23 +181,27 @@ export const usePlayerStore = defineStore('player', () => {
       isNewSong.value = false;
     }
     
+    // 对于视频文件，使用更宽松的播放检测逻辑
+    const currentSong = playlist.value[currentIndex.value || 0];
+    const isVideo = currentSong?.mediaType === MediaType.Video;
+    
     // 检测进度是否在更新（说明真正在播放）
     if (pos > lastPosition.value && pos > 0) {
       isActuallyPlaying.value = true;
       lastPositionUpdate.value = now;
       positionUpdateCount.value++;
       
-      // 新歌曲快速开始播放的情况
-      if (isNewSong.value && positionUpdateCount.value >= 1) {
-        console.log('新歌曲快速开始播放');
+      // 视频文件或新歌曲快速开始播放的情况
+      if ((isVideo || isNewSong.value) && positionUpdateCount.value >= 1) {
+        console.log(isVideo ? '视频播放状态确认' : '新歌曲快速开始播放');
       }
     } else if (Math.abs(pos - lastPosition.value) > 1) {
       // 如果位置跳跃很大（可能是跳转），重置计数器
       positionUpdateCount.value = 0;
       isActuallyPlaying.value = false;
       console.log('检测到位置跳跃，重置播放状态');
-    } else if (now - lastPositionUpdate.value > 2000) {
-      // 如果超过2秒没有进度更新，认为不在播放
+    } else if (now - lastPositionUpdate.value > (isVideo ? 3000 : 2000)) {
+      // 视频文件给予更长的检测时间（3秒 vs 2秒）
       isActuallyPlaying.value = false;
       positionUpdateCount.value = 0;
     }
