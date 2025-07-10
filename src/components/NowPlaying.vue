@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { SongInfo } from '../stores/player';
 
 const props = defineProps<{
   song: SongInfo | null;
   isPlaying: boolean;
 }>();
+
+// 封面旋转相关状态
+const coverElement = ref<HTMLElement>();
+const animationId = ref<number>();
+const currentRotation = ref(0);
+const ROTATION_SPEED = 18; // 度/秒 (20秒一圈)
 
 // 计算专辑封面
 const albumCover = computed(() => {
@@ -17,7 +22,7 @@ const albumCover = computed(() => {
   }
 });
 
-// 计算歌曲信息
+// 计算歌曲信息  
 const songTitle = computed(() => {
   return props.song?.title || '未知歌曲';
 });
@@ -29,12 +34,58 @@ const songArtist = computed(() => {
 const songAlbum = computed(() => {
   return props.song?.album || '未知专辑';
 });
+
+// 简化封面旋转控制逻辑 - 只要是播放状态就旋转
+const shouldRotate = computed(() => {
+  return props.isPlaying;
+});
+
+// 旋转动画
+const animate = () => {
+  if (shouldRotate.value) {
+    currentRotation.value += ROTATION_SPEED / 60; // 每帧增加的角度
+    
+    if (currentRotation.value >= 360) {
+      currentRotation.value -= 360;
+    }
+  }
+  
+  if (coverElement.value) {
+    coverElement.value.style.transform = `rotate(${currentRotation.value}deg)`;
+  }
+  
+  animationId.value = requestAnimationFrame(animate);
+};
+
+// 监听歌曲变化，重置旋转角度
+watch(() => props.song?.path, (newPath, oldPath) => {
+  if (newPath && newPath !== oldPath) {
+    currentRotation.value = 0;
+    if (coverElement.value) {
+      coverElement.value.style.transform = 'rotate(0deg)';
+    }
+  }
+}, { immediate: true });
+
+onMounted(() => {
+  animationId.value = requestAnimationFrame(animate);
+});
+
+onUnmounted(() => {
+  if (animationId.value) {
+    cancelAnimationFrame(animationId.value);
+  }
+});
 </script>
 
 <template>
   <div class="now-playing">
     <div class="album-cover">
-      <div class="cover-container" :class="{ rotating: isPlaying }">        <img 
+      <div 
+        ref="coverElement"
+        class="cover-container"
+      >
+        <img 
           :src="albumCover" 
           alt="Album Cover" 
           class="cover-image"
@@ -77,7 +128,6 @@ const songAlbum = computed(() => {
   overflow: hidden;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
   transform-origin: center center;
-  transition: transform 0.5s ease-out;
 }
 
 .cover-image {
@@ -87,28 +137,6 @@ const songAlbum = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: all 0.3s;
-}
-
-.rotating {
-  animation: rotate 20s linear infinite;
-  animation-play-state: running;
-}
-
-@keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 添加暂停时的样式 */
-.cover-container:not(.rotating) {
-  animation: none;
-  /* 确保暂停时保持当前旋转位置 */
-  transform: rotate(var(--current-rotation, 0deg));
 }
 
 .song-details {
