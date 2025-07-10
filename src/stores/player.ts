@@ -7,6 +7,12 @@ export interface LyricLine {
   text: string;    // 歌词文本
 }
 
+// 新增：媒体类型枚举
+export enum MediaType {
+  Audio = 'Audio',
+  Video = 'Video'
+}
+
 export interface SongInfo {
   path: string;
   title?: string;
@@ -15,6 +21,11 @@ export interface SongInfo {
   albumCover?: string;
   duration?: number;
   lyrics?: LyricLine[];  // 歌词信息
+  // 新增：MV相关字段
+  mediaType?: MediaType;  // 媒体类型
+  mvPath?: string;        // MV视频文件路径
+  videoThumbnail?: string; // 视频缩略图
+  hasLyrics?: boolean;    // 是否有歌词
 }
 
 export enum PlayerState {
@@ -139,8 +150,24 @@ export const usePlayerStore = defineStore('player', () => {
   };
 
   // 添加跳转功能
+  const seekVideoTo = async (position: number) => {
+    // 直接更新前端进度显示，给用户即时反馈
+    position.value = position;
+    console.log('视频跳转请求:', position, '秒');
+  };
+
+  // 修改原有的seekTo方法，增加视频文件检测
   const seekTo = async (position: number) => {
     try {
+      // 检查当前是否为视频文件
+      const current = currentSong.value;
+      if (current?.mediaType === MediaType.Video) {
+        // 视频文件：使用专门的视频跳转方法
+        seekVideoTo(position);
+        return;
+      }
+      
+      // 音频文件：使用原有的后端跳转逻辑
       setTransitioning(true);
       await invoke('seek_to', { position });
       console.log('跳转到位置:', position, '秒');
@@ -148,7 +175,7 @@ export const usePlayerStore = defineStore('player', () => {
       // 跳转后延迟恢复状态检测，给音频处理更多时间
       setTimeout(() => {
         setTransitioning(false);
-      }, 800); // 减少到800ms，让状态切换更快
+      }, 800);
     } catch (error) {
       console.error('跳转失败:', error);
       setTransitioning(false);
@@ -157,7 +184,6 @@ export const usePlayerStore = defineStore('player', () => {
   
   const updateProgress = (pos: number, dur: number) => {
     const now = Date.now();
-    const previousPosition = position.value;
     
     position.value = pos;
     duration.value = dur;
@@ -171,23 +197,27 @@ export const usePlayerStore = defineStore('player', () => {
       isNewSong.value = false;
     }
     
+    // 对于视频文件，使用更宽松的播放检测逻辑
+    const currentSong = playlist.value[currentIndex.value || 0];
+    const isVideo = currentSong?.mediaType === MediaType.Video;
+    
     // 检测进度是否在更新（说明真正在播放）
     if (pos > lastPosition.value && pos > 0) {
       isActuallyPlaying.value = true;
       lastPositionUpdate.value = now;
       positionUpdateCount.value++;
       
-      // 新歌曲快速开始播放的情况
-      if (isNewSong.value && positionUpdateCount.value >= 1) {
-        console.log('新歌曲快速开始播放');
+      // 视频文件或新歌曲快速开始播放的情况
+      if ((isVideo || isNewSong.value) && positionUpdateCount.value >= 1) {
+        console.log(isVideo ? '视频播放状态确认' : '新歌曲快速开始播放');
       }
     } else if (Math.abs(pos - lastPosition.value) > 1) {
       // 如果位置跳跃很大（可能是跳转），重置计数器
       positionUpdateCount.value = 0;
       isActuallyPlaying.value = false;
       console.log('检测到位置跳跃，重置播放状态');
-    } else if (now - lastPositionUpdate.value > 2000) {
-      // 如果超过2秒没有进度更新，认为不在播放
+    } else if (now - lastPositionUpdate.value > (isVideo ? 3000 : 2000)) {
+      // 视频文件给予更长的检测时间（3秒 vs 2秒）
       isActuallyPlaying.value = false;
       positionUpdateCount.value = 0;
     }
@@ -244,6 +274,29 @@ export const usePlayerStore = defineStore('player', () => {
     playMode.value = mode;
   };
   
+  // 添加视频时长管理
+  const videoDurations = ref<Map<string, number>>(new Map());
+
+  // 更新视频文件的真实时长
+  const updateVideoDuration = (filePath: string, duration: number) => {
+    videoDurations.value.set(filePath, duration);
+    console.log('更新视频时长缓存:', filePath, '→', duration, '秒');
+    
+    // 同时更新播放列表中对应歌曲的时长显示
+    const songIndex = playlist.value.findIndex(song => song.path === filePath);
+    if (songIndex !== -1) {
+      // 创建新的歌曲对象，更新时长信息
+      const updatedSong = { ...playlist.value[songIndex], duration };
+      playlist.value[songIndex] = updatedSong;
+      console.log('更新播放列表中的视频时长:', updatedSong.title, '→', duration, '秒');
+    }
+  };
+
+  // 获取视频文件的真实时长
+  const getVideoDuration = (filePath: string): number | undefined => {
+    return videoDurations.value.get(filePath);
+  };
+  
   return {
     // 状态
     state,
@@ -281,5 +334,7 @@ export const usePlayerStore = defineStore('player', () => {
     updateState,
     updatePlayMode,
     setTransitioning, // 新增方法
+    updateVideoDuration, // 更新视频时长
+    getVideoDuration,     // 获取视频时长
   };
 });

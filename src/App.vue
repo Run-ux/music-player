@@ -7,6 +7,7 @@ import PlayerControls from "./components/PlayerControls.vue";
 import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
 import LyricsDisplay from "./components/LyricsDisplay.vue";
+import VideoPlayer from "./components/VideoPlayer.vue";
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
@@ -183,7 +184,14 @@ onMounted(() => {
       </div>
       
       <div class="center-panel">
+        <!-- 根据媒体类型显示不同组件 -->
+        <VideoPlayer
+          v-if="playerStore.currentSong?.mediaType === 'Video'"
+          :song="playerStore.currentSong"
+          :is-playing="playerStore.isPlaying"
+        />
         <LyricsDisplay
+          v-else
           :lyrics="playerStore.currentSong?.lyrics"
           :current-time="playerStore.position"
           :is-playing="playerStore.isPlaying"

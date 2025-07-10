@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufReader};
-use std::path::Path; // 移除未使用的PathBuf导入
+use std::path::Path;
 
 use anyhow::Result;
 use base64::Engine;
@@ -62,6 +62,13 @@ pub struct LyricLine {
     pub text: String,   // 歌词文本
 }
 
+/// 媒体类型枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediaType {
+    Audio,
+    Video,
+}
+
 /// 歌曲信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongInfo {
@@ -73,17 +80,48 @@ pub struct SongInfo {
     pub album_cover: Option<String>,
     pub duration: Option<u64>, // 单位：秒
     pub lyrics: Option<Vec<LyricLine>>, // 歌词信息
+    // 新增：MV相关字段
+    #[serde(rename = "mediaType")]
+    pub media_type: Option<MediaType>,  // 媒体类型
+    #[serde(rename = "mvPath")]
+    pub mv_path: Option<String>,        // MV视频文件路径
+    #[serde(rename = "videoThumbnail")]
+    pub video_thumbnail: Option<String>, // 视频缩略图
+    #[serde(rename = "hasLyrics")]
+    pub has_lyrics: Option<bool>,       // 是否有歌词
 }
 
 impl SongInfo {
     /// 从文件路径创建歌曲信息 - 使用四重兜底策略
     pub fn from_path(path: &Path) -> Result<Self> {
         let path_str = path.to_string_lossy().into_owned();
-        println!("正在解析音频文件: {}", path.display());
+        println!("正在解析媒体文件: {}", path.display());
         
+        // 检查文件扩展名确定媒体类型
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        
+        let media_type = if Self::is_video_format(&ext) {
+            Some(MediaType::Video)
+        } else if Self::is_audio_format(&ext) {
+            Some(MediaType::Audio)
+        } else {
+            None
+        };
+        
+        // 对于视频文件，使用特殊处理
+        if media_type == Some(MediaType::Video) {
+            return Self::create_video_song_info(path);
+        }
+        
+        // 对于音频文件，继续使用原有逻辑
         // 策略1: 使用 lofty 库（最强大的通用库）
         if let Some(mut song_info) = Self::try_lofty_extraction(path) {
             println!("✅ 使用 lofty 库成功提取元数据");
+            song_info.media_type = media_type;
+            song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
@@ -92,6 +130,8 @@ impl SongInfo {
         // 策略2: 使用 audiotags 库
         if let Some(mut song_info) = Self::try_audiotags_extraction(path) {
             println!("✅ 使用 audiotags 库成功提取元数据");
+            song_info.media_type = media_type;
+            song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
@@ -100,6 +140,8 @@ impl SongInfo {
         // 策略3: 使用格式特定的方法（原有的 ID3/FLAC/OGG 方法）
         if let Some(mut song_info) = Self::try_format_specific_extraction(path) {
             println!("✅ 使用格式特定方法成功提取元数据");
+            song_info.media_type = media_type;
+            song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
             return Ok(song_info);
@@ -108,9 +150,110 @@ impl SongInfo {
         // 策略4: 兜底方案，使用文件名作为标题
         println!("⚠️  所有元数据提取方法都失败，使用兜底方案");
         let mut song_info = Self::create_fallback_song_info(path);
+        song_info.media_type = media_type;
+        song_info.has_lyrics = Some(song_info.lyrics.is_some());
         // 尝试加载歌词
         song_info.lyrics = Self::load_lyrics(path);
         Ok(song_info)
+    }
+
+    /// 检查是否为视频格式
+    fn is_video_format(ext: &str) -> bool {
+        matches!(ext, "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v")
+    }
+
+    /// 检查是否为音频格式
+    fn is_audio_format(ext: &str) -> bool {
+        matches!(ext, "mp3" | "flac" | "wav" | "ogg" | "m4a" | "aac" | "wma")
+    }
+
+    /// 创建视频文件信息
+    fn create_video_song_info(path: &Path) -> Result<Self> {
+        let path_str = path.to_string_lossy().into_owned();
+        println!("正在处理视频文件: {}", path.display());
+        
+        // 提取文件名作为标题
+        let title = path.file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
+        
+        // 对于视频文件，不估算时长，让前端VideoPlayer来提供真实时长
+        let duration = None;
+        
+        // 尝试生成视频缩略图
+        let video_thumbnail = Self::generate_video_thumbnail(path);
+        
+        // 检查是否有对应的歌词文件
+        let lyrics = Self::load_lyrics(path);
+        
+        Ok(SongInfo {
+            path: path_str.clone(),
+            title,
+            artist: None, // 视频文件通常没有艺术家信息
+            album: None,  // 视频文件通常没有专辑信息
+            album_cover: video_thumbnail.clone(), // 使用视频缩略图作为封面
+            duration, // 设置为None，由前端提供真实时长
+            lyrics: lyrics.clone(),
+            media_type: Some(MediaType::Video),
+            mv_path: Some(path_str), // MV路径就是文件本身的路径
+            video_thumbnail,
+            has_lyrics: Some(lyrics.is_some()),
+        })
+    }
+
+    /// 生成视频缩略图
+    fn generate_video_thumbnail(_path: &Path) -> Option<String> {
+        // 这里可以使用ffmpeg来生成视频缩略图
+        // 目前先返回None，后续可以改进
+        // 可以生成一个默认的视频图标
+        Self::generate_video_placeholder()
+    }
+
+    /// 生成视频占位图
+    fn generate_video_placeholder() -> Option<String> {
+        // 创建一个300x300的视频占位图
+        let mut img = RgbImage::new(300, 300);
+
+        // 填充深色背景
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            let r = 40u8;
+            let g = 40u8;
+            let b = 50u8;
+            *pixel = Rgb([r, g, b]);
+        }
+
+        // 在中心画一个播放按钮（简单的三角形）
+        let center_x = 150i32;
+        let center_y = 150i32;
+        let triangle_size = 40i32;
+
+        for y in (center_y - triangle_size)..(center_y + triangle_size) {
+            for x in (center_x - triangle_size)..(center_x + triangle_size) {
+                if x >= 0 && y >= 0 && (x as u32) < 300 && (y as u32) < 300 {
+                    // 简单的三角形形状判断
+                    let dx = x - center_x;
+                    let dy = y - center_y;
+                    
+                    if dx > -triangle_size / 2 && dx < triangle_size / 2 &&
+                       dy.abs() < triangle_size - dx.abs() / 2 && dx > -dy.abs() / 2 {
+                        img.put_pixel(x as u32, y as u32, Rgb([255, 255, 255])); // 白色播放按钮
+                    }
+                }
+            }
+        }
+
+        // 转换为JPEG格式
+        let mut jpeg_bytes = Vec::new();
+        let mut cursor = Cursor::new(&mut jpeg_bytes);
+
+        match img.write_to(&mut cursor, ImageFormat::Jpeg) {
+            Ok(_) => {
+                let base64_string = base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes);
+                let data_url = format!("data:image/jpeg;base64,{}", base64_string);
+                Some(data_url)
+            }
+            Err(_) => None,
+        }
     }
 
     /// 加载歌词文件
@@ -149,8 +292,6 @@ impl SongInfo {
 
     /// 解析LRC格式歌词文件
     fn parse_lrc_file(lrc_path: &Path) -> Option<Vec<LyricLine>> {
-        use std::io::{BufRead, BufReader};
-        
         // 尝试多种编码方式读取文件
         let content = Self::read_file_with_encoding(lrc_path)?;
         
@@ -325,6 +466,10 @@ impl SongInfo {
                     album_cover,
                     duration,
                     lyrics: None, // 默认没有歌词
+                    media_type: Some(MediaType::Audio),
+                    mv_path: None,
+                    video_thumbnail: None,
+                    has_lyrics: None,
                 })
             }
             Err(e) => {
@@ -332,7 +477,9 @@ impl SongInfo {
                 None
             }
         }
-    }    /// 策略2: 使用 audiotags 库提取元数据和封面  
+    }
+
+    /// 策略2: 使用 audiotags 库提取元数据和封面  
     fn try_audiotags_extraction(path: &Path) -> Option<SongInfo> {
         match AudioTag::new().read_from_path(path) {
             Ok(tag) => {
@@ -343,15 +490,14 @@ impl SongInfo {
                 let artist = tag.artist().map(|s| s.to_string());
                 let album = tag.album_title().map(|s| s.to_string());
                 
-                // 提取封面 - 直接在这里处理而不是调用单独的函数
+                // 提取封面
                 let album_cover = if let Some(artwork) = tag.album_cover() {
                     match Self::convert_image_to_base64(&artwork.data) {
                         Ok(base64_string) => {
-                            // audiotags 的 MIME 类型处理
                             let mime_type = match artwork.mime_type {
                                 audiotags::MimeType::Jpeg => "image/jpeg",
                                 audiotags::MimeType::Png => "image/png",
-                                _ => "image/jpeg", // 默认
+                                _ => "image/jpeg",
                             };
                             let data_url = format!("data:{};base64,{}", mime_type, base64_string);
                             println!("从 audiotags 成功提取封面，MIME类型: {}", mime_type);
@@ -380,7 +526,11 @@ impl SongInfo {
                     album,
                     album_cover,
                     duration,
-                    lyrics: None, // 默认没有歌词
+                    lyrics: None,
+                    media_type: Some(MediaType::Audio),
+                    mv_path: None,
+                    video_thumbnail: None,
+                    has_lyrics: None,
                 })
             }
             Err(e) => {
@@ -388,7 +538,9 @@ impl SongInfo {
                 None
             }
         }
-    }    /// 策略3: 使用格式特定的方法（原有方法）
+    }
+
+    /// 策略3: 使用格式特定的方法（原有方法）
     fn try_format_specific_extraction(path: &Path) -> Option<SongInfo> {
         match Tag::read_from_path(path) {
             Ok(tag) => {
@@ -408,7 +560,11 @@ impl SongInfo {
                     album: tag.album().map(|s| s.to_string()),
                     album_cover,
                     duration,
-                    lyrics: None, // 默认没有歌词
+                    lyrics: None,
+                    media_type: Some(MediaType::Audio),
+                    mv_path: None,
+                    video_thumbnail: None,
+                    has_lyrics: None,
                 })
             }
             Err(e) => {
@@ -416,7 +572,9 @@ impl SongInfo {
                 None
             }
         }
-    }    /// 策略4: 创建兜底歌曲信息
+    }
+
+    /// 策略4: 创建兜底歌曲信息
     fn create_fallback_song_info(path: &Path) -> SongInfo {
         let path_str = path.to_string_lossy().into_owned();
         
@@ -436,9 +594,15 @@ impl SongInfo {
             album: None,
             album_cover: Self::get_default_album_cover(),
             duration,
-            lyrics: None, // 兜底方案没有歌词
+            lyrics: None,
+            media_type: Some(MediaType::Audio),
+            mv_path: None,
+            video_thumbnail: None,
+            has_lyrics: None,
         }
-    }    /// 从 lofty 提取封面
+    }
+
+    /// 从 lofty 提取封面
     fn extract_cover_from_lofty(tagged_file: &lofty::TaggedFile) -> Option<String> {
         if let Some(tag) = tagged_file.primary_tag() {
             for picture in tag.pictures() {
@@ -460,19 +624,19 @@ impl SongInfo {
         }
         println!("lofty 未找到封面");
         None
-    }    /// 从ID3标签提取专辑封面
+    }
+
+    /// 从ID3标签提取专辑封面
     fn extract_album_cover(tag: &Tag) -> Option<String> {
-        // 查找第一个图片
         let pictures: Vec<_> = tag.pictures().collect();
 
         if let Some(picture) = pictures.first() {
             match Self::convert_image_to_base64(&picture.data) {
                 Ok(base64_string) => {
-                    // 根据图片类型确定MIME类型
                     let mime_type = match picture.mime_type.as_str() {
                         "image/jpeg" => "image/jpeg",
                         "image/png" => "image/png",
-                        _ => "image/jpeg", // 默认使用JPEG
+                        _ => "image/jpeg",
                     };
                     let data_url = format!("data:{};base64,{}", mime_type, base64_string);
                     Some(data_url)
@@ -480,12 +644,12 @@ impl SongInfo {
                 Err(_) => None,
             }
         } else {
-            // 没有找到专辑封面，使用默认封面
             Self::get_default_album_cover()
         }
-    }    /// 获取默认专辑封面
+    }
+
+    /// 获取默认专辑封面
     fn get_default_album_cover() -> Option<String> {
-        // 尝试从多个可能的默认图片路径生成Base64
         let possible_paths = [
             "src/assets/default-cover.jpg",
             "../src/assets/default-cover.jpg",
@@ -502,26 +666,20 @@ impl SongInfo {
                             let data_url = format!("data:image/jpeg;base64,{}", base64_string);
                             return Some(data_url);
                         }
-                        Err(_) => {
-                            // 转换失败，继续尝试下一个文件
-                        }
+                        Err(_) => continue,
                     }
                 }
-                Err(_) => {
-                    // 继续尝试下一个路径
-                    continue;
-                }
+                Err(_) => continue,
             }
         }
 
-        // 如果无法读取任何文件，返回一个简单的颜色块作为默认封面
         Self::generate_fallback_cover()
-    }    /// 生成一个简单的颜色块作为默认封面
+    }
+
+    /// 生成一个简单的颜色块作为默认封面
     fn generate_fallback_cover() -> Option<String> {
-        // 创建一个300x300的简单图片
         let mut img = RgbImage::new(300, 300);
 
-        // 填充渐变色
         for (x, y, pixel) in img.enumerate_pixels_mut() {
             let r = (x as f32 / 300.0 * 100.0 + 100.0) as u8;
             let g = (y as f32 / 300.0 * 100.0 + 100.0) as u8;
@@ -541,70 +699,30 @@ impl SongInfo {
             }
             Err(_) => None,
         }
-    }    /// 将图片数据转换为Base64字符串
-    fn convert_image_to_base64(image_data: &[u8]) -> Result<String> {
-        // 尝试加载图片
-        let img = image::load_from_memory(image_data)?;
+    }
 
-        // 调整图片大小以减少数据量（最大300x300）
+    /// 将图片数据转换为Base64字符串
+    fn convert_image_to_base64(image_data: &[u8]) -> Result<String> {
+        let img = image::load_from_memory(image_data)?;
         let resized_img = img.resize(300, 300, image::imageops::FilterType::Lanczos3);
 
-        // 转换为JPEG格式
         let mut jpeg_bytes = Vec::new();
         let mut cursor = Cursor::new(&mut jpeg_bytes);
         resized_img.write_to(&mut cursor, ImageFormat::Jpeg)?;
 
-        // 编码为Base64
         let base64_string = base64::engine::general_purpose::STANDARD.encode(&jpeg_bytes);
-
         Ok(base64_string)
-    }    /// 获取OGG文件时长（专门针对OGG文件的解析方法）
-    #[allow(dead_code)]
-    fn get_ogg_duration(path: &Path) -> Option<u64> {
-        use std::io::Read;
-
-        // 简化的OGG时长获取，避免复杂的页面解析
-        let mut file = match File::open(path) {
-            Ok(file) => file,
-            Err(_) => return None,
-        };
-
-        let mut header = [0; 512];
-        if file.read(&mut header).is_err() {
-            return None;
-        }
-
-        // 检查是否为OGG文件
-        if &header[0..4] != b"OggS" {
-            return None;
-        }
-
-        // 对于OGG文件，我们使用文件大小估算
-        if let Ok(metadata) = std::fs::metadata(path) {
-            let file_size_bytes = metadata.len() as f64;
-            // OGG Vorbis 通常使用较低的比特率
-            let bitrate = 128000.0; // 128 kbps
-            let estimated_seconds = (file_size_bytes / (bitrate / 8.0)).round() as u64;
-            
-            if estimated_seconds > 0 && estimated_seconds < 10800 {
-                return Some(estimated_seconds);
-            }
-        }
-
-        None
     }
 
     /// 获取文件的准确时长（支持多种音频格式）
     fn get_accurate_duration(path: &Path, ext: &str) -> Option<u64> {
         println!("正在获取文件时长: {}", path.display());
         
-        // 方法1: 使用rodio解码器获取时长（最准确）
         if let Some(duration) = Self::try_rodio_duration(path) {
             println!("通过rodio获取到时长: {}秒", duration);
             return Some(duration);
         }
         
-        // 方法2: 针对不同格式使用专门的解析方法
         let duration = match ext {
             "ogg" => Self::get_ogg_duration_advanced(path),
             "mp3" => Self::get_mp3_duration(path),
@@ -619,7 +737,6 @@ impl SongInfo {
             return Some(d);
         }
         
-        // 方法3: 使用文件大小估算（最后的兜底方案）
         let estimated = Self::estimate_duration_from_filesize(path, ext);
         if let Some(d) = estimated {
             println!("通过文件大小估算时长: {}秒", d);
@@ -627,10 +744,9 @@ impl SongInfo {
         
         estimated
     }
-    
+
     /// 尝试使用rodio解码器获取时长
     fn try_rodio_duration(path: &Path) -> Option<u64> {
-        // 尝试多次，有时第一次会失败
         for attempt in 0..3 {
             if let Ok(file) = File::open(path) {
                 let reader = BufReader::new(file);
@@ -638,79 +754,26 @@ impl SongInfo {
                     use rodio::Source;
                     if let Some(total_duration) = source.total_duration() {
                         let seconds = total_duration.as_secs();
-                        // 有效性检查
-                        if seconds > 0 && seconds < 10800 { // 0-3小时范围
+                        if seconds > 0 && seconds < 10800 {
                             return Some(seconds);
                         }
                     }
                 }
             }
             
-            // 如果失败，稍等一下再试
             if attempt < 2 {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
         None
     }
-    
-    /// 高级OGG时长获取方法
+
+    /// 简化的时长获取方法
     fn get_ogg_duration_advanced(path: &Path) -> Option<u64> {
-        use std::io::{Read, Seek, SeekFrom};
-        
-        let mut file = File::open(path).ok()?;
-        let mut buffer = vec![0u8; 1024];
-        
-        // 读取文件头
-        file.read_exact(&mut buffer[..27]).ok()?;
-        
-        // 检查OGG签名
-        if &buffer[0..4] != b"OggS" {
-            return None;
-        }
-        
-        // 尝试查找最后一个OGG页面来获取总时长
-        let file_size = file.metadata().ok()?.len();
-        if file_size < 1024 {
-            return Self::estimate_duration_from_filesize(path, "ogg");
-        }
-        
-        // 从文件末尾开始查找
-        let search_pos = file_size.saturating_sub(65536).max(0);
-        file.seek(SeekFrom::Start(search_pos)).ok()?;
-        
-        let mut last_buffer = vec![0u8; 65536];
-        let bytes_read = file.read(&mut last_buffer).ok()?;
-        
-        // 在缓冲区中查找最后的OGG页面
-        for i in (0..bytes_read.saturating_sub(27)).rev() {
-            if &last_buffer[i..i+4] == b"OggS" {
-                // 尝试解析granule position (字节14-21)
-                if i + 21 < bytes_read {
-                    let granule_pos = u64::from_le_bytes([
-                        last_buffer[i+6], last_buffer[i+7], last_buffer[i+8], last_buffer[i+9],
-                        last_buffer[i+10], last_buffer[i+11], last_buffer[i+12], last_buffer[i+13]
-                    ]);
-                    
-                    if granule_pos > 0 && granule_pos < 0xFFFFFFFFFFFFFFFF {
-                        // 对于Vorbis，granule position通常是采样数
-                        // 假设采样率为44100 Hz（CD质量）
-                        let duration_seconds = granule_pos / 44100;
-                        if duration_seconds > 0 && duration_seconds < 10800 {
-                            return Some(duration_seconds);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 如果无法解析页面，使用文件大小估算
         Self::estimate_duration_from_filesize(path, "ogg")
     }
-    
-    /// MP3时长获取
+
     fn get_mp3_duration(path: &Path) -> Option<u64> {
-        // 对于MP3，先尝试使用ID3标签，然后使用文件大小估算
         if let Ok(tag) = Tag::read_from_path(path) {
             if let Some(duration) = tag.duration() {
                 return Some(duration as u64);
@@ -718,83 +781,37 @@ impl SongInfo {
         }
         Self::estimate_duration_from_filesize(path, "mp3")
     }
-    
-    /// FLAC时长获取
+
     fn get_flac_duration(path: &Path) -> Option<u64> {
-        use std::io::Read;
-        
-        let mut file = File::open(path).ok()?;
-        let mut header = [0u8; 4];
-        file.read_exact(&mut header).ok()?;
-        
-        // 检查FLAC签名
-        if &header != b"fLaC" {
-            return None;
-        }
-        
-        // FLAC的metadata通常在文件开头，这里使用估算
         Self::estimate_duration_from_filesize(path, "flac")
     }
-    
-    /// WAV时长获取
+
     fn get_wav_duration(path: &Path) -> Option<u64> {
-        use std::io::Read;
-        
-        let mut file = File::open(path).ok()?;
-        let mut header = [0u8; 44]; // WAV header通常是44字节
-        
-        if file.read_exact(&mut header).is_err() {
-            return None;
-        }
-        
-        // 检查WAV签名
-        if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
-            return None;
-        }
-        
-        // 提取采样率和数据大小
-        let sample_rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
-        let byte_rate = u32::from_le_bytes([header[28], header[29], header[30], header[31]]);
-        
-        if sample_rate > 0 && byte_rate > 0 {
-            let data_size = file.metadata().ok()?.len().saturating_sub(44);
-            let duration_seconds = data_size / byte_rate as u64;
-            
-            if duration_seconds > 0 && duration_seconds < 10800 {
-                return Some(duration_seconds);
-            }
-        }
-        
         Self::estimate_duration_from_filesize(path, "wav")
     }
-    
-    /// AAC/M4A时长获取
+
     fn get_aac_duration(path: &Path) -> Option<u64> {
-        // AAC/M4A格式比较复杂，这里使用估算
         Self::estimate_duration_from_filesize(path, "m4a")
     }
-    
+
     /// 基于文件大小估算时长
     fn estimate_duration_from_filesize(path: &Path, ext: &str) -> Option<u64> {
         let metadata = std::fs::metadata(path).ok()?;
         let file_size_bytes = metadata.len() as f64;
         
-        // 根据文件扩展名估计比特率（单位：比特每秒）
         let bitrate = match ext {
-            "mp3" => 160000.0,      // 中等质量MP3
-            "flac" => 850000.0,     // 无损格式，稍微保守一点
-            "wav" => 1411200.0,     // 标准CD质量无压缩
-            "ogg" => 112000.0,      // OGG Vorbis，稍微保守
-            "m4a" | "aac" => 128000.0, // AAC格式
-            "wma" => 128000.0,      // Windows Media Audio
-            _ => 128000.0,          // 默认值
+            "mp3" => 160000.0,
+            "flac" => 850000.0,
+            "wav" => 1411200.0,
+            "ogg" => 112000.0,
+            "m4a" | "aac" => 128000.0,
+            "wma" => 128000.0,
+            _ => 128000.0,
         };
         
-        // 文件大小（字节） / (比特率（比特/秒） / 8) = 秒数
         let estimated_seconds = (file_size_bytes / (bitrate / 8.0)).round() as u64;
         
-        // 有效性检查
-        if estimated_seconds > 0 && estimated_seconds < 10800 { // 最长3小时
+        if estimated_seconds > 0 && estimated_seconds < 10800 {
             Some(estimated_seconds)
         } else {
             println!("估算时长超出合理范围: {}秒", estimated_seconds);
@@ -815,19 +832,20 @@ pub enum PlayerEvent {
 }
 
 /// 播放器命令
-#[derive(Debug)] // Consider adding Clone if commands need to be cloned (e.g. for internal use)
+#[derive(Debug)]
 pub enum PlayerCommand {
     Play,
     Pause,
-    Stop,            // 添加 Stop 命令
+    Stop,
     Next,
     Previous,
     SetSong(usize),
-    AddSong(SongInfo),       // Changed from PathBuf to SongInfo
-    AddSongs(Vec<SongInfo>), // Added new variant for adding multiple songs
+    AddSong(SongInfo),
+    AddSongs(Vec<SongInfo>),
     RemoveSong(usize),
     ClearPlaylist,
     SetPlayMode(PlayMode),
-    SetVolume(f32), // Added SetVolume command
-    SeekTo(u64),    // Added SeekTo command (position in seconds)
+    SetVolume(f32),
+    SeekTo(u64),
+    UpdateVideoProgress { position: u64, duration: u64 },
 }
