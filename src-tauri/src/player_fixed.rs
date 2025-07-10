@@ -177,12 +177,8 @@ impl SongInfo {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
         
-        // 尝试获取视频时长
-        let ext = path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let duration = Self::get_video_duration(path, &ext);
+        // 对于视频文件，不估算时长，让前端VideoPlayer来提供真实时长
+        let duration = None;
         
         // 尝试生成视频缩略图
         let video_thumbnail = Self::generate_video_thumbnail(path);
@@ -196,34 +192,13 @@ impl SongInfo {
             artist: None, // 视频文件通常没有艺术家信息
             album: None,  // 视频文件通常没有专辑信息
             album_cover: video_thumbnail.clone(), // 使用视频缩略图作为封面
-            duration,
+            duration, // 设置为None，由前端提供真实时长
             lyrics: lyrics.clone(),
             media_type: Some(MediaType::Video),
             mv_path: Some(path_str), // MV路径就是文件本身的路径
             video_thumbnail,
             has_lyrics: Some(lyrics.is_some()),
         })
-    }
-
-    /// 获取视频文件时长
-    fn get_video_duration(path: &Path, _ext: &str) -> Option<u64> {
-        // 这里可以使用ffprobe或其他视频处理库来获取时长
-        // 目前先用文件大小估算，后续可以改进
-        let metadata = std::fs::metadata(path).ok()?;
-        let file_size_bytes = metadata.len() as f64;
-        
-        // 视频文件的比特率估算（单位：比特每秒）
-        let bitrate = 2000000.0; // 2 Mbps，这是一个中等质量视频的估算值
-        
-        let estimated_seconds = (file_size_bytes / (bitrate / 8.0)).round() as u64;
-        
-        // 有效性检查
-        if estimated_seconds > 0 && estimated_seconds < 14400 { // 最长4小时
-            Some(estimated_seconds)
-        } else {
-            println!("视频时长估算超出合理范围: {}秒", estimated_seconds);
-            None
-        }
     }
 
     /// 生成视频缩略图

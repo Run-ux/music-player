@@ -19,6 +19,25 @@ const videoSrc = ref<string>('');
 const loadingError = ref<string>('');
 const isVideoPlaying = ref(false);
 
+// 添加实际视频时长状态
+const actualVideoDuration = ref<number>(0);
+
+// 计算显示的时长 - 优先使用视频实际时长
+const displayDuration = computed(() => {
+  if (actualVideoDuration.value > 0) {
+    return actualVideoDuration.value;
+  }
+  return props.song?.duration || 0;
+});
+
+// 格式化时长显示
+const formatDuration = (seconds: number) => {
+  if (seconds <= 0) return '--:--';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+};
+
 // 计算歌曲信息  
 const songTitle = computed(() => {
   return props.song?.title || '未知视频';
@@ -123,20 +142,25 @@ const sendProgressToBackend = async (position: number, duration: number) => {
 
 // 处理视频时间更新 - 同步到主播放器进度
 const handleTimeUpdate = () => {
-  if (videoElement.value && props.song?.duration && isVideoLoaded.value) {
+  if (videoElement.value && isVideoLoaded.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
-    const duration = Math.floor(videoElement.value.duration) || props.song.duration;
+    const videoDuration = Math.floor(videoElement.value.duration);
+    
+    // 更新实际时长（如果还没设置）
+    if (videoDuration > 0 && actualVideoDuration.value !== videoDuration) {
+      actualVideoDuration.value = videoDuration;
+    }
     
     // 只有在视频真正播放时才更新进度（避免拖拽干扰）
     if (!videoElement.value.paused && isVideoPlaying.value) {
-      // 同步到主播放器进度，实现统一进度显示
-      playerStore.updateProgress(currentTime, duration);
+      // 同步到主播放器进度，使用实际视频时长
+      playerStore.updateProgress(currentTime, videoDuration);
       // 同时发送到后端，确保后端状态同步
-      sendProgressToBackend(currentTime, duration);
+      sendProgressToBackend(currentTime, videoDuration);
       
       // 减少日志输出频率，只在整秒变化时输出
       if (currentTime !== lastLoggedTime.value) {
-        console.log('视频进度同步:', currentTime, '/', duration);
+        console.log('视频进度同步:', currentTime, '/', videoDuration);
         lastLoggedTime.value = currentTime;
       }
     }
@@ -146,24 +170,50 @@ const handleTimeUpdate = () => {
 // 添加日志控制变量
 const lastLoggedTime = ref(-1);
 
-// 监听主播放器的跳转命令 - 实现统一进度控制
+// 添加跳转控制标志，避免循环触发
+const isUserSeeking = ref(false);
+const lastSeekPosition = ref(-1);
+
+// 监听主播放器的position变化来实现进度条跳转
 watch(() => playerStore.position, (newPosition, oldPosition) => {
-  if (videoElement.value && isVideoLoaded.value && 
-      Math.abs(newPosition - oldPosition) > 1 && 
-      Math.abs(newPosition - videoElement.value.currentTime) > 1) {
-    console.log('主播放器进度控制：视频跳转到', newPosition, '秒');
-    videoElement.value.currentTime = newPosition;
+  if (videoElement.value && isVideoLoaded.value && !isUserSeeking.value) {
+    const currentVideoTime = Math.floor(videoElement.value.currentTime);
+    
+    // 检测是否是用户主动跳转（位置差异大且不是自然播放进度）
+    const positionDiff = Math.abs(newPosition - currentVideoTime);
+    const isSignificantJump = positionDiff > 2;
+    const isNotNaturalProgress = Math.abs(newPosition - oldPosition) > 2;
+    
+    if (isSignificantJump && isNotNaturalProgress) {
+      console.log('检测到进度条跳转，视频跳转到:', newPosition, '秒');
+      isUserSeeking.value = true;
+      lastSeekPosition.value = newPosition;
+      videoElement.value.currentTime = newPosition;
+      
+      // 延迟重置标志
+      setTimeout(() => {
+        isUserSeeking.value = false;
+      }, 200);
+    }
   }
 });
 
 // 新增：监听视频跳转事件，同步进度
 const handleVideoSeek = () => {
-  if (videoElement.value && props.song?.duration) {
+  if (videoElement.value && actualVideoDuration.value > 0 && !isUserSeeking.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
-    const duration = Math.floor(videoElement.value.duration) || props.song.duration;
+    const duration = actualVideoDuration.value;
     
     console.log('视频手动跳转，同步进度:', currentTime);
+    
+    // 设置标志避免循环触发
+    isUserSeeking.value = true;
     playerStore.updateProgress(currentTime, duration);
+    sendProgressToBackend(currentTime, duration);
+    
+    setTimeout(() => {
+      isUserSeeking.value = false;
+    }, 100);
   }
 };
 
@@ -199,9 +249,17 @@ const handleVideoLoadedMetadata = () => {
     const videoDuration = Math.floor(videoElement.value.duration);
     console.log('视频元数据加载完成，时长:', videoDuration, '秒');
     
-    // 如果歌曲信息中没有时长，使用视频的实际时长
-    if (!props.song.duration && videoDuration > 0) {
+    // 更新实际视频时长
+    actualVideoDuration.value = videoDuration;
+    
+    // 立即同步正确的时长到播放器系统，确保进度条使用正确的时长
+    if (videoDuration > 0) {
+      console.log('立即同步视频时长到播放器系统:', videoDuration, '秒');
       playerStore.updateProgress(0, videoDuration);
+      sendProgressToBackend(0, videoDuration);
+      
+      // 新增：更新PlayerStore中的视频时长缓存，让播放列表能显示正确时长
+      playerStore.updateVideoDuration(props.song.path, videoDuration);
     }
   }
 };
@@ -267,8 +325,8 @@ onUnmounted(() => {
         <span class="status-indicator" :class="{ playing: isVideoPlaying }">
           {{ isVideoPlaying ? '播放中' : '已暂停' }}
         </span>
-        <span v-if="props.song?.duration" class="duration-info">
-          时长: {{ Math.floor(props.song.duration / 60) }}:{{ String(props.song.duration % 60).padStart(2, '0') }}
+        <span v-if="displayDuration > 0" class="duration-info">
+          时长: {{ formatDuration(displayDuration) }}
         </span>
       </div>
     </div>

@@ -52,7 +52,7 @@ const handleProgressClick = (event: MouseEvent) => {
   const clickPercent = Math.max(0, Math.min(1, clickX / progressWidth));
   const targetPosition = Math.floor(clickPercent * duration.value);
   
-  console.log(`进度条点击跳转: ${targetPosition}秒 (${(clickPercent * 100).toFixed(1)}%)`);
+  console.log(`进度条点击跳转: ${targetPosition}秒 (${(clickPercent * 100).toFixed(1)}%), 基于时长: ${duration.value}秒`);
   
   // 立即更新前端显示，给用户即时反馈
   position.value = targetPosition;

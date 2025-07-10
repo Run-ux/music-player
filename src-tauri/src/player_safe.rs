@@ -527,13 +527,19 @@ fn run_player_thread(
                         PlayerCommand::SeekTo(position_secs) => {
                             if let Some(current_idx) = player_state_guard.current_index {
                                 if let Some(song) = player_state_guard.playlist.get(current_idx) {
-                                    if let Some(duration) = song.duration {
-                                        // 确保跳转位置在有效范围内
+                                    // 检查是否为视频文件
+                                    let is_video = song.media_type == Some(crate::player_fixed::MediaType::Video);
+                                    
+                                    if is_video {
+                                        // 视频文件：不处理SeekTo命令，跳转完全由前端VideoPlayer处理
+                                        println!("视频文件跳转：忽略后端SeekTo命令，由前端处理");
+                                        // 不发送任何事件，避免干扰前端的跳转逻辑
+                                    } else if let Some(duration) = song.duration {
+                                        // 音频文件且有时长信息：原有的rodio跳转逻辑
                                         let seek_position = position_secs.min(duration);
                                         
-                                        println!("收到跳转请求: {}秒", seek_position);
+                                        println!("收到音频跳转请求: {}秒", seek_position);
                                         
-                                        // 获取当前播放状态
                                         let was_playing = player_state_guard.state == PlayerState::Playing;
                                         let song_clone = song.clone();
                                         

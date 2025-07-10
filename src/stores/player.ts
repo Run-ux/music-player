@@ -150,8 +150,24 @@ export const usePlayerStore = defineStore('player', () => {
   };
 
   // 添加跳转功能
+  const seekVideoTo = async (position: number) => {
+    // 直接更新前端进度显示，给用户即时反馈
+    position.value = position;
+    console.log('视频跳转请求:', position, '秒');
+  };
+
+  // 修改原有的seekTo方法，增加视频文件检测
   const seekTo = async (position: number) => {
     try {
+      // 检查当前是否为视频文件
+      const current = currentSong.value;
+      if (current?.mediaType === MediaType.Video) {
+        // 视频文件：使用专门的视频跳转方法
+        seekVideoTo(position);
+        return;
+      }
+      
+      // 音频文件：使用原有的后端跳转逻辑
       setTransitioning(true);
       await invoke('seek_to', { position });
       console.log('跳转到位置:', position, '秒');
@@ -159,7 +175,7 @@ export const usePlayerStore = defineStore('player', () => {
       // 跳转后延迟恢复状态检测，给音频处理更多时间
       setTimeout(() => {
         setTransitioning(false);
-      }, 800); // 减少到800ms，让状态切换更快
+      }, 800);
     } catch (error) {
       console.error('跳转失败:', error);
       setTransitioning(false);
@@ -258,6 +274,29 @@ export const usePlayerStore = defineStore('player', () => {
     playMode.value = mode;
   };
   
+  // 添加视频时长管理
+  const videoDurations = ref<Map<string, number>>(new Map());
+
+  // 更新视频文件的真实时长
+  const updateVideoDuration = (filePath: string, duration: number) => {
+    videoDurations.value.set(filePath, duration);
+    console.log('更新视频时长缓存:', filePath, '→', duration, '秒');
+    
+    // 同时更新播放列表中对应歌曲的时长显示
+    const songIndex = playlist.value.findIndex(song => song.path === filePath);
+    if (songIndex !== -1) {
+      // 创建新的歌曲对象，更新时长信息
+      const updatedSong = { ...playlist.value[songIndex], duration };
+      playlist.value[songIndex] = updatedSong;
+      console.log('更新播放列表中的视频时长:', updatedSong.title, '→', duration, '秒');
+    }
+  };
+
+  // 获取视频文件的真实时长
+  const getVideoDuration = (filePath: string): number | undefined => {
+    return videoDurations.value.get(filePath);
+  };
+  
   return {
     // 状态
     state,
@@ -295,5 +334,7 @@ export const usePlayerStore = defineStore('player', () => {
     updateState,
     updatePlayMode,
     setTransitioning, // 新增方法
+    updateVideoDuration, // 更新视频时长
+    getVideoDuration,     // 获取视频时长
   };
 });
