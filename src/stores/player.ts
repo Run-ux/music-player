@@ -38,8 +38,34 @@ export const usePlayerStore = defineStore('player', () => {
   const position = ref<number>(0);
   const duration = ref<number>(0);
   
+  // 新增：智能播放状态检测
+  const isActuallyPlaying = ref(false); // 真实播放状态
+  const lastPositionUpdate = ref(0); // 最后一次进度更新时间
+  const isTransitioning = ref(false); // 是否正在跳转
+  const lastPosition = ref(0); // 上次记录的播放位置
+  const positionUpdateCount = ref(0); // 进度更新计数器
+  const isNewSong = ref(false); // 是否是新歌曲开始
+  
   // 计算属性
   const isPlaying = computed(() => state.value === PlayerState.Playing);
+  
+  // 新增：智能检测是否真正在播放（更精确的逻辑）
+  const isReallyPlaying = computed(() => {
+    // 如果不是播放状态，肯定不在播放
+    if (!isPlaying.value) return false;
+    
+    // 如果正在跳转，不显示播放状态
+    if (isTransitioning.value) return false;
+    
+    // 如果是新歌曲且播放很快开始，直接显示播放状态
+    if (isNewSong.value && isActuallyPlaying.value) {
+      return true;
+    }
+    
+    // 对于跳转后的情况，需要更严格的检测
+    return isActuallyPlaying.value && positionUpdateCount.value >= 2;
+  });
+  
   const progress = computed(() => {
     if (!duration.value) return 0;
     return (position.value / duration.value) * 100;
@@ -115,25 +141,85 @@ export const usePlayerStore = defineStore('player', () => {
   // 添加跳转功能
   const seekTo = async (position: number) => {
     try {
+      setTransitioning(true);
       await invoke('seek_to', { position });
       console.log('跳转到位置:', position, '秒');
+      
+      // 跳转后延迟恢复状态检测，给音频处理更多时间
+      setTimeout(() => {
+        setTransitioning(false);
+      }, 800); // 减少到800ms，让状态切换更快
     } catch (error) {
       console.error('跳转失败:', error);
+      setTransitioning(false);
     }
   };
   
   const updateProgress = (pos: number, dur: number) => {
+    const now = Date.now();
+    const previousPosition = position.value;
+    
     position.value = pos;
     duration.value = dur;
+    
+    // 检测是否是新歌曲（进度从0开始且持续时间发生变化）
+    if (pos === 0 && dur !== duration.value) {
+      isNewSong.value = true;
+      positionUpdateCount.value = 0;
+      console.log('检测到新歌曲开始');
+    } else if (pos > 2) { // 播放超过2秒后不再认为是新歌
+      isNewSong.value = false;
+    }
+    
+    // 检测进度是否在更新（说明真正在播放）
+    if (pos > lastPosition.value && pos > 0) {
+      isActuallyPlaying.value = true;
+      lastPositionUpdate.value = now;
+      positionUpdateCount.value++;
+      
+      // 新歌曲快速开始播放的情况
+      if (isNewSong.value && positionUpdateCount.value >= 1) {
+        console.log('新歌曲快速开始播放');
+      }
+    } else if (Math.abs(pos - lastPosition.value) > 1) {
+      // 如果位置跳跃很大（可能是跳转），重置计数器
+      positionUpdateCount.value = 0;
+      isActuallyPlaying.value = false;
+      console.log('检测到位置跳跃，重置播放状态');
+    } else if (now - lastPositionUpdate.value > 2000) {
+      // 如果超过2秒没有进度更新，认为不在播放
+      isActuallyPlaying.value = false;
+      positionUpdateCount.value = 0;
+    }
+    
+    lastPosition.value = pos;
+  };
+
+  // 优化：设置跳转状态
+  const setTransitioning = (transitioning: boolean) => {
+    isTransitioning.value = transitioning;
+    if (transitioning) {
+      // 跳转时重置播放检测
+      isActuallyPlaying.value = false;
+      positionUpdateCount.value = 0;
+      console.log('开始跳转，重置播放状态检测');
+    } else {
+      console.log('跳转结束，开始检测播放状态');
+    }
   };
 
   // 添加专门的进度重置方法
   const resetProgress = () => {
     position.value = 0;
     duration.value = 0;
+    // 重置播放状态检测
+    isActuallyPlaying.value = false;
+    lastPositionUpdate.value = 0;
+    lastPosition.value = 0;
+    positionUpdateCount.value = 0;
+    isNewSong.value = true; // 新歌曲标记
   };
 
-  // 更新当前歌曲时自动重置进度
   const updateCurrentSong = (index: number) => {
     const oldIndex = currentIndex.value;
     currentIndex.value = index;
@@ -167,6 +253,11 @@ export const usePlayerStore = defineStore('player', () => {
     position,
     duration,
     
+    // 新增状态
+    isReallyPlaying, // 智能播放状态
+    isTransitioning, // 跳转状态
+    isNewSong, // 新歌曲状态
+    
     // 计算属性
     isPlaying,
     progress,
@@ -188,6 +279,7 @@ export const usePlayerStore = defineStore('player', () => {
     updatePlaylist,
     updateCurrentSong,
     updateState,
-    updatePlayMode
+    updatePlayMode,
+    setTransitioning, // 新增方法
   };
 });
