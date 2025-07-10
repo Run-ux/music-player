@@ -112,17 +112,26 @@ export const usePlayerStore = defineStore('player', () => {
   };
   
   const next = async () => {
+    console.log('切换到下一首歌曲');
     await invoke('next');
+    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+    state.value = PlayerState.Playing;
   };
   
   const previous = async () => {
+    console.log('切换到上一首歌曲');
     await invoke('previous');
+    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+    state.value = PlayerState.Playing;
   };
   
   const setCurrentSong = async (index: number) => {
     if (index >= 0 && index < playlist.value.length) {
+      console.log('用户选择歌曲:', index);
       await invoke('set_song', { index });
       currentIndex.value = index;
+      // 重要：确保前端状态也更新为播放状态，因为后端在设置歌曲时会自动开始播放
+      state.value = PlayerState.Playing;
     }
   };
   

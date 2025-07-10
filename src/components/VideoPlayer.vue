@@ -108,12 +108,25 @@ const handleVideoLoaded = () => {
   isVideoLoaded.value = true;
   loadingError.value = '';
   
-  // 如果主播放器处于播放状态，自动开始播放视频
-  if (props.isPlaying && videoElement.value) {
+  // 优化：视频加载完成后立即开始播放（无论主播放器状态如何）
+  if (videoElement.value) {
     videoElement.value.play().then(() => {
       isVideoPlaying.value = true;
-      console.log('视频自动开始播放');
-    }).catch(console.error);
+      console.log('新视频自动开始播放');
+      
+      // 确保主播放器状态同步为播放
+      if (!props.isPlaying) {
+        playerStore.play();
+      }
+    }).catch((error) => {
+      console.warn('视频自动播放失败，可能需要用户交互:', error);
+      // 如果自动播放失败，但主播放器是播放状态，仍然尝试播放
+      if (props.isPlaying) {
+        setTimeout(() => {
+          videoElement.value?.play().catch(console.error);
+        }, 100);
+      }
+    });
   }
 };
 
@@ -260,6 +273,22 @@ const handleVideoLoadedMetadata = () => {
       
       // 新增：更新PlayerStore中的视频时长缓存，让播放列表能显示正确时长
       playerStore.updateVideoDuration(props.song.path, videoDuration);
+    }
+    
+    // 优化：元数据加载完成后，如果视频已经加载完成但还没开始播放，立即开始播放
+    if (isVideoLoaded.value && !isVideoPlaying.value) {
+      console.log('元数据加载完成，尝试开始播放视频');
+      videoElement.value.play().then(() => {
+        isVideoPlaying.value = true;
+        console.log('视频在元数据加载后自动开始播放');
+        
+        // 确保主播放器状态同步为播放
+        if (!props.isPlaying) {
+          playerStore.play();
+        }
+      }).catch((error) => {
+        console.warn('元数据加载后视频自动播放失败:', error);
+      });
     }
   }
 };

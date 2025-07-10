@@ -131,11 +131,9 @@ const handleSelectSong = async (index: number) => {
   if (playerStore.currentIndex === index && playerStore.isPlaying) {
     await playerStore.pause();
   } else {
-    // 设置当前歌曲
+    // 设置当前歌曲（这已经会自动开始播放）
     await playerStore.setCurrentSong(index);
-    
-    // 开始播放
-    await playerStore.play();
+    // 注意：不需要再次调用 play()，因为 setCurrentSong 已经设置为播放状态
   }
 };
 
