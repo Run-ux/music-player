@@ -566,24 +566,32 @@ export const usePlayerStore = defineStore('player', () => {
       currentPlaybackMode.value = mode;
       console.log('播放模式已设置为:', mode);
       
-      // 关键修复：视频切音频时确保播放状态
+      // 关键修复：视频切音频时确保播放状态和UI同步
       if (oldMode === MediaType.Video && mode === MediaType.Audio) {
-        console.log('视频切音频模式，确保播放状态流畅');
+        console.log('🎵 视频切音频模式，强制确保播放状态同步');
         
-        // 等待一小段时间让后端处理完成
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // 强制设置为播放状态
+        // 立即设置为播放状态，确保播放按钮显示正确
         state.value = PlayerState.Playing;
         
-        // 如果之前在播放或者是视频切音频，确保音频开始播放
-        if (wasPlaying || oldMode === MediaType.Video) {
-          try {
-            await invoke('play');
-            console.log('视频切音频后音频自动开始播放');
-          } catch (error) {
-            console.warn('视频切音频后启动播放失败:', error);
-          }
+        // 等待一小段时间让后端处理完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // 确保音频开始播放
+        try {
+          await invoke('play');
+          console.log('✅ 视频切音频后音频自动开始播放');
+          
+          // 再次确认播放状态
+          state.value = PlayerState.Playing;
+        } catch (error) {
+          console.warn('视频切音频后启动播放失败:', error);
+        }
+      } else if (oldMode === MediaType.Audio && mode === MediaType.Video) {
+        console.log('🎬 音频切视频模式，确保状态同步');
+        
+        // 视频模式也确保播放状态
+        if (wasPlaying) {
+          state.value = PlayerState.Playing;
         }
       }
     } catch (error) {

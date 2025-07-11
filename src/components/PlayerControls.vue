@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import PlayModeControl from './PlayModeControl.vue';
+import PlaybackModeControl from './PlaybackModeControl.vue';
 import { usePlayerStore, SongInfo, MediaType, PlayerState } from '../stores/player';
 
 const props = defineProps<{
@@ -280,7 +281,10 @@ watch(() => props.currentSong, (newSong, oldSong) => {
     
     <!-- 保留原有的播放模式控制 -->
     <div class="play-mode-section">
-      <PlayModeControl />
+      <div class="mode-controls-container">
+        <PlayModeControl />
+        <PlaybackModeControl />
+      </div>
     </div>
   </div>
 </template>
@@ -461,6 +465,11 @@ watch(() => props.currentSong, (newSong, oldSong) => {
   padding-top: 1rem;
   border-top: 1px solid var(--border-light);
   margin-top: auto;
+}
+
+.mode-controls-container {
+  display: flex;
+  gap: 0.5rem;
 }
 
 /* 响应式设计 */
