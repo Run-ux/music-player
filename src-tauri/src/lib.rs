@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex as AsyncMutex;
 
-/// Tauri 应用状态 - 现在使用 GlobalPlayer 单例，不再需要存储播放器实例
+/// Tauri 应用状态
 #[derive(Default, Clone)]
 struct AppState {
     // 保留结构以便将来扩展
@@ -36,7 +36,7 @@ struct InitialPlayerState {
     play_mode: PlayMode,
 }
 
-/// 初始化播放器 - 简化版本
+/// 初始化播放器
 #[tauri::command]
 async fn init_player<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
@@ -234,7 +234,7 @@ async fn seek_to(position: u64, _state: tauri::State<'_, AppState>) -> Result<()
         .map_err(|e| e.to_string())
 }
 
-/// 打开文件对话框添加歌曲 - 扩展为支持音频和视频文件
+/// 打开文件对话框添加歌曲，支持音频和视频文件
 #[tauri::command]
 async fn open_audio_files<R: Runtime>(
     app_handle: AppHandle<R>,
@@ -330,7 +330,7 @@ async fn open_audio_files<R: Runtime>(
     Ok(())
 }
 
-/// 获取视频流数据 - 用于前端播放视频
+/// 获取视频流数据，用于前端播放视频
 #[tauri::command]
 async fn get_video_stream(file_path: String) -> Result<Vec<u8>, String> {
     println!("开始读取视频文件: {}", file_path);
@@ -370,7 +370,7 @@ async fn get_initial_player_state(
     })
 }
 
-/// 应用程序设置函数 - 简化版本
+/// 应用程序设置函数，
 fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     // 创建一个空的 AppState
     let app_state = AppState {};
@@ -419,7 +419,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// 更新视频播放进度 - 专门用于视频文件的进度同步
+/// 更新视频播放进度，专门用于视频文件的进度同步
 #[tauri::command]
 async fn update_video_progress(position: u64, duration: u64, _state: tauri::State<'_, AppState>) -> Result<(), String> {
     let player_instance = get_player_instance().await?;
@@ -431,8 +431,7 @@ async fn update_video_progress(position: u64, duration: u64, _state: tauri::Stat
         if let Some(song) = playlist.get(current_idx) {
             // 只有当前播放的是视频文件时才处理
             if song.media_type == Some(crate::player_fixed::MediaType::Video) {
-                // 这里我们需要直接访问事件发送器来发送进度更新
-                // 由于架构限制，我们通过特殊的命令来处理视频进度
+                //直接访问事件发送器来发送进度更新
                 player_state_guard
                     .player
                     .send_command(PlayerCommand::UpdateVideoProgress { position, duration })
@@ -533,6 +532,7 @@ async fn set_playback_mode(mode: crate::player_fixed::MediaType, _state: tauri::
 #[tauri::command]
 async fn get_current_playback_mode(_state: tauri::State<'_, AppState>) -> Result<crate::player_fixed::MediaType, String> {
     let player_instance = get_player_instance().await?;
+
     let player_state_guard = player_instance.lock().await;
     let snapshot = player_state_guard.player.get_player_state_snapshot().await;
     Ok(snapshot.current_playback_mode)
@@ -550,4 +550,5 @@ async fn check_song_mode_support(song_index: usize, _state: tauri::State<'_, App
     } else {
         Err("歌曲索引无效".to_string())
     }
+
 }

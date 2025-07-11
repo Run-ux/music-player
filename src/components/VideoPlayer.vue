@@ -234,7 +234,9 @@ const handleVideoError = (event: Event) => {
   isVideoPlaying.value = false;
 };
 
+
 // 关键修复：完全隔离的时间更新处理
+
 const handleTimeUpdate = () => {
   if (videoElement.value && isVideoLoaded.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
@@ -265,7 +267,7 @@ const handleTimeUpdate = () => {
 const isUserSeeking = ref(false);
 const isPlayerControlsJumping = ref(false); // 新增：主进度条跳转标志
 
-// 监听主播放器的position变化来实现进度条跳转 - 完全重写
+// 监听主播放器的position变化来实现进度条跳转
 watch(() => playerStore.position, (newPosition, oldPosition) => {
   // 如果视频被隔离，不响应主播放器进度变化
   if (isVideoIsolated.value) {

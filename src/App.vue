@@ -8,6 +8,7 @@ import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
 import LyricsDisplay from "./components/LyricsDisplay.vue";
 import VideoPlayer from "./components/VideoPlayer.vue";
+import StarWarsTitles from "./components/StarWarsTitles.vue"; // 新增导入
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
@@ -109,7 +110,6 @@ const initPlayer = async () => {
           default:
             console.warn('Unknown event type:', payload.type);        }
       } else {
-        // 兼容旧格式
         if (payload.StateChanged) {
           playerStore.updateState(payload.StateChanged);
         }
@@ -163,7 +163,6 @@ const handleSelectSong = async (index: number) => {
   } else {
     // 设置当前歌曲（这已经会自动开始播放）
     await playerStore.setCurrentSong(index);
-    // 注意：不需要再次调用 play()，因为 setCurrentSong 已经设置为播放状态
   }
 };
 
@@ -176,19 +175,25 @@ const handleLyricsSeek = (time: number) => {
   playerStore.seekTo(time);
 };
 
+// 新增：入场动画状态
+const showIntro = ref(true); // 新增：入场动画状态
+
 // 组件挂载时初始化
 onMounted(() => {
-  initPlayer();
-  
-  // 初始化播放模式
-  playerStore.initializePlaybackMode();
-  
-  // 添加默认专辑图片
-  const link = document.createElement('link');
-  link.rel = 'preload';
-  link.href = '/default-album.png';
-  link.as = 'image';
-  document.head.appendChild(link);
+  // 新增：播放星球大战动画，动画结束后进入主界面
+  showIntro.value = true;
+  setTimeout(() => {
+    showIntro.value = false;
+    // 动画结束后再初始化播放器
+    initPlayer();
+    playerStore.initializePlaybackMode();
+    // 添加默认专辑图片
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.href = '/default-album.png';
+    link.as = 'image';
+    document.head.appendChild(link);
+  }, 11000); // 动画时长约11秒（可根据StarWars动画实际调整）
 });
 
 

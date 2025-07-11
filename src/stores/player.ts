@@ -7,7 +7,7 @@ export interface LyricLine {
   text: string;    // 歌词文本
 }
 
-// 新增：媒体类型枚举
+// 媒体类型枚举
 export enum MediaType {
   Audio = 'Audio',
   Video = 'Video'
@@ -19,6 +19,7 @@ export interface SongInfo {
   artist?: string;
   album?: string;
   albumCover?: string;
+
   duration?: number; // 秒
   lyrics?: LyricLine[];
   mediaType?: MediaType;
@@ -28,6 +29,7 @@ export interface SongInfo {
   // 新增：支持播放模式切换判断
   supportsModeSwitch?: boolean;
   isPureVideo?: boolean;
+
 }
 
 export enum PlayerState {
@@ -50,9 +52,9 @@ export const usePlayerStore = defineStore('player', () => {
   const playMode = ref<PlayMode>(PlayMode.Sequential);
   const position = ref<number>(0);
   const duration = ref<number>(0);
-  const currentPlaybackMode = ref<MediaType>(MediaType.Audio); // 新增：当前播放模式
+  const currentPlaybackMode = ref<MediaType>(MediaType.Audio); // 当前播放模式
   
-  // 新增：智能播放状态检测
+  // 智能播放状态检测
   const isActuallyPlaying = ref(false); // 真实播放状态
   const lastPositionUpdate = ref(0); // 最后一次进度更新时间
   const isTransitioning = ref(false); // 是否正在跳转
@@ -298,6 +300,7 @@ export const usePlayerStore = defineStore('player', () => {
   };
   
   const next = async () => {
+
     console.log('⏭️ 切换到下一首歌曲');
     
     // 切歌前先停止所有播放器
@@ -331,6 +334,7 @@ export const usePlayerStore = defineStore('player', () => {
   
   const setCurrentSong = async (index: number) => {
     if (index >= 0 && index < playlist.value.length) {
+
       console.log('🎵 用户选择歌曲:', index, playlist.value[index]?.title);
       
       // 选歌前先停止所有播放器
@@ -345,6 +349,7 @@ export const usePlayerStore = defineStore('player', () => {
       } catch (error) {
         console.error('选择歌曲失败:', error);
       }
+
     }
   };
   
@@ -371,7 +376,9 @@ export const usePlayerStore = defineStore('player', () => {
     await invoke('open_audio_files');
   };
 
+
   // 完全重写seekTo方法，彻底分离音频和视频跳转逻辑
+
   const seekTo = async (targetPosition: number) => {
     try {
       const current = currentSong.value;
@@ -379,6 +386,7 @@ export const usePlayerStore = defineStore('player', () => {
         console.warn('没有当前歌曲，无法跳转');
         return;
       }
+
 
       console.log('🎯 智能跳转开始:', targetPosition, '秒，当前歌曲:', current.title);
       
@@ -389,6 +397,7 @@ export const usePlayerStore = defineStore('player', () => {
       const isVideoMode = current.mediaType === MediaType.Video || 
                          (currentPlaybackMode.value === MediaType.Video && current.mvPath);
       
+
       if (isVideoMode) {
         console.log('🎬 视频模式跳转 - 完全由前端VideoPlayer处理');
         
@@ -447,7 +456,7 @@ export const usePlayerStore = defineStore('player', () => {
     lastPosition.value = pos;
   };
 
-  // 优化：设置跳转状态
+  // 设置跳转状态
   const setTransitioning = (transitioning: boolean) => {
     isTransitioning.value = transitioning;
     if (transitioning) {
@@ -603,9 +612,8 @@ export const usePlayerStore = defineStore('player', () => {
     playMode,
     position,
     duration,
-    currentPlaybackMode, // 新增
+    currentPlaybackMode, 
     
-    // 新增状态
     isReallyPlaying, // 智能播放状态
     isTransitioning, // 跳转状态
     isNewSong, // 新歌曲状态
@@ -616,7 +624,7 @@ export const usePlayerStore = defineStore('player', () => {
     isPlaying,
     progress,
     currentSong,
-    currentSongHasMv, // 新增
+    currentSongHasMv,
     
     // 方法
     play,
@@ -635,9 +643,10 @@ export const usePlayerStore = defineStore('player', () => {
     updateCurrentSong,
     updateState,
     updatePlayMode,
-    setTransitioning, // 新增方法
+    setTransitioning, 
     updateVideoDuration, // 更新视频时长
     getVideoDuration,     // 获取视频时长
+
     togglePlaybackMode, // 新增：切换播放模式
     setPlaybackMode,    // 新增：设置播放模式
     initializePlaybackMode, // 新增：初始化播放模式
@@ -646,5 +655,6 @@ export const usePlayerStore = defineStore('player', () => {
     activateAudioPlayer,
     deactivateVideoPlayer,
     deactivateAudioPlayer,
+
   };
 });
