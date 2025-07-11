@@ -94,7 +94,7 @@ pub struct SongInfo {
 impl SongInfo {
     /// 从文件路径创建歌曲信息 - 使用四重兜底策略
     pub fn from_path(path: &Path) -> Result<Self> {
-        let path_str = path.to_string_lossy().into_owned();
+        let _path_str = path.to_string_lossy().into_owned();
         println!("正在解析媒体文件: {}", path.display());
         
         // 检查文件扩展名确定媒体类型
@@ -124,6 +124,8 @@ impl SongInfo {
             song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
+            // 查找对应的MV文件
+            song_info.find_associated_mv();
             return Ok(song_info);
         }
         
@@ -134,6 +136,8 @@ impl SongInfo {
             song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
+            // 查找对应的MV文件
+            song_info.find_associated_mv();
             return Ok(song_info);
         }
         
@@ -144,6 +148,8 @@ impl SongInfo {
             song_info.has_lyrics = Some(song_info.lyrics.is_some());
             // 尝试加载歌词
             song_info.lyrics = Self::load_lyrics(path);
+            // 查找对应的MV文件
+            song_info.find_associated_mv();
             return Ok(song_info);
         }
         
@@ -154,7 +160,53 @@ impl SongInfo {
         song_info.has_lyrics = Some(song_info.lyrics.is_some());
         // 尝试加载歌词
         song_info.lyrics = Self::load_lyrics(path);
+        // 查找对应的MV文件
+        song_info.find_associated_mv();
         Ok(song_info)
+    }
+
+    /// 查找对应的MV文件
+    pub fn find_associated_mv(&mut self) {
+        // 只有音频文件才需要查找对应的MV
+        if self.media_type != Some(MediaType::Audio) {
+            return;
+        }
+
+        let audio_path = Path::new(&self.path);
+        let audio_dir = match audio_path.parent() {
+            Some(dir) => dir,
+            None => return,
+        };
+
+        let audio_stem = match audio_path.file_stem().and_then(|s| s.to_str()) {
+            Some(stem) => stem,
+            None => return,
+        };
+
+        // 可能的MV文件扩展名
+        let video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v"];
+        
+        for ext in &video_extensions {
+            let mv_path = audio_dir.join(format!("{}.{}", audio_stem, ext));
+            
+            if mv_path.exists() {
+                println!("为歌曲 {} 找到对应的MV文件: {}", audio_stem, mv_path.display());
+                self.mv_path = Some(mv_path.to_string_lossy().into_owned());
+                
+                // 尝试生成视频缩略图
+                self.video_thumbnail = Self::generate_video_thumbnail(&mv_path);
+                break;
+            }
+        }
+
+        if self.mv_path.is_none() {
+            println!("歌曲 {} 没有找到对应的MV文件", audio_stem);
+        }
+    }
+
+    /// 检查是否有关联的MV
+    pub fn has_mv(&self) -> bool {
+        self.mv_path.is_some()
     }
 
     /// 检查是否为视频格式
@@ -215,7 +267,7 @@ impl SongInfo {
         let mut img = RgbImage::new(300, 300);
 
         // 填充深色背景
-        for (x, y, pixel) in img.enumerate_pixels_mut() {
+        for (_, _, pixel) in img.enumerate_pixels_mut() {
             let r = 40u8;
             let g = 40u8;
             let b = 50u8;
@@ -848,4 +900,7 @@ pub enum PlayerCommand {
     SetVolume(f32),
     SeekTo(u64),
     UpdateVideoProgress { position: u64, duration: u64 },
+    // 新增：切换播放模式命令
+    TogglePlaybackMode, // 在音频模式和MV模式之间切换
+    SetPlaybackMode(MediaType), // 直接设置播放模式（音频或视频）
 }

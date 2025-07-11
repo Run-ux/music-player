@@ -1,4 +1,4 @@
-use crate::player_fixed::{PlayMode, PlayerCommand, PlayerEvent, PlayerState, SongInfo};
+use crate::player_fixed::{PlayMode, PlayerCommand, PlayerEvent, PlayerState, SongInfo, MediaType};
 use rand::Rng; // Added for shuffle mode
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -12,6 +12,7 @@ pub struct SafePlayerState {
     current_index: Option<usize>,
     play_mode: PlayMode,
     volume: f32, // Added volume field
+    current_playback_mode: MediaType, // 新增：当前播放模式（音频或MV）
 }
 
 impl Default for SafePlayerState {
@@ -22,6 +23,7 @@ impl Default for SafePlayerState {
             current_index: None,
             play_mode: PlayMode::Sequential,
             volume: 1.0, // Default volume
+            current_playback_mode: MediaType::Audio, // 默认音频模式
         }
     }
 }
@@ -297,6 +299,12 @@ fn run_player_thread(
                                 continue;
                             }
 
+                            // 关键修复：切歌时无论什么模式都要先停止音频
+                            if let Some(sink) = current_sink.take() {
+                                sink.stop();
+                                println!("切歌操作：停止所有音频播放");
+                            }
+
                             let current_idx_opt = player_state_guard.current_index;
                             let playlist_len = player_state_guard.playlist.len();
                             let play_mode = player_state_guard.play_mode;
@@ -339,11 +347,8 @@ fn run_player_thread(
                                 _ => unreachable!(),
                             };
 
-                            if playlist_len == 0 { // Should be caught by is_empty earlier, but as a safeguard
+                            if playlist_len == 0 {
                                 player_state_guard.current_index = None;
-                                if let Some(sink) = current_sink.take() {
-                                    sink.stop();
-                                }
                                 player_state_guard.state = PlayerState::Stopped;
                                 let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(player_state_guard.state));
                                 continue;
@@ -353,6 +358,7 @@ fn run_player_thread(
                             player_state_guard.current_index = Some(new_index);
                             let song = player_state_guard.playlist[new_index].clone();
                             let is_video = song.media_type == Some(crate::player_fixed::MediaType::Video);
+                            let current_playback_mode = player_state_guard.current_playback_mode;
                             
                             // 重置播放进度
                             current_position = 0;
@@ -381,18 +387,21 @@ fn run_player_thread(
 
                             drop(player_state_guard); 
 
-                            // 如果是音频文件，需要处理rodio播放
-                            if !is_video {
-                                if let Some(sink) = current_sink.take() {
-                                    sink.stop();
-                                }
+                            // 根据当前播放模式和歌曲类型决定如何播放
+                            let should_play_audio = match (current_playback_mode, &song.media_type) {
+                                (MediaType::Audio, _) => !is_video, // 音频模式只播放非视频文件
+                                (MediaType::Video, Some(MediaType::Video)) => false, // 视频模式下的视频文件不用音频
+                                (MediaType::Video, _) => song.mv_path.is_none(), // 视频模式下没有MV的音频文件仍用音频播放
+                            };
 
+                            if should_play_audio {
+                                // 播放音频文件
                                 match std::fs::File::open(&song.path) {
                                     Ok(file) => match rodio::Decoder::new(std::io::BufReader::new(file)) {
                                         Ok(source) => match rodio::Sink::try_new(&stream_handle) {
                                             Ok(sink) => {
                                                 sink.append(source);
-                                                sink.play(); // 确保音频文件立即开始播放
+                                                sink.play();
                                                 current_sink = Some(sink);
                                                 
                                                 // 设置播放开始时间
@@ -413,11 +422,7 @@ fn run_player_thread(
                                     }
                                 }
                             } else {
-                                // 视频文件：清理可能存在的音频sink
-                                if let Some(sink) = current_sink.take() {
-                                    sink.stop();
-                                }
-                                
+                                // 视频文件或MV模式：不使用音频，等待前端VideoPlayer
                                 println!("视频文件切换完成，等待前端VideoPlayer开始播放: {}", song.title.as_deref().unwrap_or("未知"));
                             }
                         }
@@ -579,18 +584,23 @@ fn run_player_thread(
                         PlayerCommand::SeekTo(position_secs) => {
                             if let Some(current_idx) = player_state_guard.current_index {
                                 if let Some(song) = player_state_guard.playlist.get(current_idx) {
-                                    // 检查是否为视频文件
-                                    let is_video = song.media_type == Some(crate::player_fixed::MediaType::Video);
+                                    // 关键修复：检查当前播放模式和歌曲类型
+                                    let current_playback_mode = player_state_guard.current_playback_mode;
+                                    let is_video_file = song.media_type == Some(crate::player_fixed::MediaType::Video);
+                                    let is_mv_mode = current_playback_mode == crate::player_fixed::MediaType::Video && song.mv_path.is_some();
                                     
-                                    if is_video {
-                                        // 视频文件：不处理SeekTo命令，跳转完全由前端VideoPlayer处理
-                                        println!("视频文件跳转：忽略后端SeekTo命令，由前端处理");
-                                        // 不发送任何事件，避免干扰前端的跳转逻辑
-                                    } else if let Some(duration) = song.duration {
-                                        // 音频文件且有时长信息：原有的rodio跳转逻辑
+                                    // 如果是视频模式，完全不处理SeekTo命令
+                                    if is_video_file || is_mv_mode {
+                                        println!("视频模式下忽略SeekTo命令，由前端VideoPlayer处理");
+                                        // 不发送任何事件，避免干扰前端
+                                        continue;
+                                    }
+                                    
+                                    // 只有音频模式才处理SeekTo
+                                    if let Some(duration) = song.duration {
                                         let seek_position = position_secs.min(duration);
                                         
-                                        println!("收到音频跳转请求: {}秒", seek_position);
+                                        println!("音频模式SeekTo: {}秒", seek_position);
                                         
                                         let was_playing = player_state_guard.state == PlayerState::Playing;
                                         let song_clone = song.clone();
@@ -642,7 +652,7 @@ fn run_player_thread(
                                                                 current_sink = Some(sink);
                                                                 current_position = seek_position;
                                                                 
-                                                                println!("成功跳转到位置: {}秒", seek_position);
+                                                                println!("音频跳转成功: {}秒", seek_position);
                                                                 
                                                                 // 更新播放器状态
                                                                 let mut player_state_guard = state.lock().unwrap();
@@ -700,6 +710,200 @@ fn run_player_thread(
                                             position, 
                                             duration 
                                         });
+                                    }
+                                }
+                            }
+                        }
+                        PlayerCommand::TogglePlaybackMode => {
+                            // 切换播放模式（音频<->MV）
+                            let current_mode = player_state_guard.current_playback_mode;
+                            let new_mode = match current_mode {
+                                MediaType::Audio => MediaType::Video,
+                                MediaType::Video => MediaType::Audio,
+                            };
+                            
+                            println!("播放模式切换：{:?} -> {:?}", current_mode, new_mode);
+                            
+
+                            // 关键修复：无论什么模式切换，都要先停止当前的音频播放
+                            if let Some(sink) = current_sink.take() {
+                                sink.stop();
+                                println!("播放模式切换：停止所有音频播放");
+                            }
+                            
+
+                            let was_playing = player_state_guard.state == PlayerState::Playing;
+                            let current_idx = player_state_guard.current_index;
+                            
+
+                            // 更新播放模式
+                            player_state_guard.current_playback_mode = new_mode;
+                            
+
+                            // 如果之前在播放，需要根据新模式重新开始播放
+                            if was_playing {
+                                if let Some(current_idx) = current_idx {
+                                    // 先克隆需要的歌曲信息，然后释放锁
+                                    let song = player_state_guard.playlist.get(current_idx).cloned();
+                                    drop(player_state_guard);
+                                    
+                                    if let Some(song) = song {
+                                        match new_mode {
+                                            MediaType::Audio => {
+                                                // 切换到音频模式：重新加载音频文件
+                                                println!("重新加载音频文件: {}", song.path);
+                                                match std::fs::File::open(&song.path) {
+                                                    Ok(file) => match rodio::Decoder::new(std::io::BufReader::new(file)) {
+                                                        Ok(source) => match rodio::Sink::try_new(&stream_handle) {
+                                                            Ok(sink) => {
+                                                                sink.append(source);
+                                                                sink.play();
+                                                                current_sink = Some(sink);
+                                                                
+                                                                // 重置播放进度追踪
+                                                                current_position = 0;
+                                                                paused_position = 0;
+                                                                play_start_time = Some(std::time::Instant::now());
+                                                                
+                                                                println!("已切换到音频模式并开始播放");
+                                                                
+                                                                // 发送状态更新
+                                                                let mut state_guard = state.lock().unwrap();
+                                                                state_guard.state = PlayerState::Playing;
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Playing));
+                                                                
+                                                                // 重置进度
+                                                                if let Some(duration) = song.duration {
+                                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                                        position: 0, 
+                                                                        duration 
+                                                                    });
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("切换到音频模式失败: {}", e)));
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("音频解码失败: {}", e)));
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e)));
+                                                    }
+                                                }
+                                            }
+                                            MediaType::Video => {
+                                                // 切换到视频模式：确保没有audio sink在运行
+                                                println!("已切换到视频模式，等待前端VideoPlayer开始播放");
+                                                
+                                                // 发送状态更新
+                                                let mut state_guard = state.lock().unwrap();
+                                                state_guard.state = PlayerState::Playing;
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Playing));
+                                                
+                                                // 重置进度（让前端VideoPlayer来提供真实进度）
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                    position: 0, 
+                                                    duration: song.duration.unwrap_or(0)
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 发送播放模式变更通知
+                            println!("播放模式切换完成：{:?}", new_mode);
+                        }
+                        PlayerCommand::SetPlaybackMode(mode) => {
+                            // 设置特定的播放模式 - 类似切换逻辑
+                            let current_mode = player_state_guard.current_playback_mode;
+                            if current_mode == mode {
+                                println!("播放模式无变化：{:?}", mode);
+                                continue; // 无需切换
+                            }
+                            
+                            println!("设置播放模式：{:?} -> {:?}", current_mode, mode);
+                            
+
+                            // 关键修复：先停止所有音频播放
+                            if let Some(sink) = current_sink.take() {
+                                sink.stop();
+                                println!("设置播放模式：停止所有音频播放");
+                            }
+                            
+
+                            let was_playing = player_state_guard.state == PlayerState::Playing;
+                            let current_idx = player_state_guard.current_index;
+                            
+
+                            // 更新播放模式
+                            player_state_guard.current_playback_mode = mode;
+                            
+
+                            // 如果之前在播放，根据新模式重新开始
+                            if was_playing {
+                                if let Some(current_idx) = current_idx {
+                                    // 先克隆需要的歌曲信息，然后释放锁
+                                    let song = player_state_guard.playlist.get(current_idx).cloned();
+                                    drop(player_state_guard);
+                                    
+                                    if let Some(song) = song {
+                                        match mode {
+                                            MediaType::Audio => {
+                                                // 重新加载音频
+                                                println!("设置音频模式，重新加载音频文件: {}", song.path);
+                                                match std::fs::File::open(&song.path) {
+                                                    Ok(file) => match rodio::Decoder::new(std::io::BufReader::new(file)) {
+                                                        Ok(source) => match rodio::Sink::try_new(&stream_handle) {
+                                                            Ok(sink) => {
+                                                                sink.append(source);
+                                                                sink.play();
+                                                                current_sink = Some(sink);
+                                                                
+                                                                current_position = 0;
+                                                                paused_position = 0;
+                                                                play_start_time = Some(std::time::Instant::now());
+                                                                
+                                                                let mut state_guard = state.lock().unwrap();
+                                                                state_guard.state = PlayerState::Playing;
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Playing));
+                                                                
+                                                                if let Some(duration) = song.duration {
+                                                                    let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                                        position: 0, 
+                                                                        duration 
+                                                                    });
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("设置音频模式失败: {}", e)));
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("音频解码失败: {}", e)));
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        let _ = player_thread_event_tx.try_send(PlayerEvent::Error(format!("无法打开音频文件: {}", e)));
+                                                    }
+                                                }
+                                            }
+                                            MediaType::Video => {
+                                                // 设置视频模式：确保没有音频在播放
+                                                println!("设置视频模式，等待前端VideoPlayer开始播放");
+                                                
+                                                let mut state_guard = state.lock().unwrap();
+                                                state_guard.state = PlayerState::Playing;
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::StateChanged(PlayerState::Playing));
+                                                
+                                                let _ = player_thread_event_tx.try_send(PlayerEvent::ProgressUpdate { 
+                                                    position: 0, 
+                                                    duration: song.duration.unwrap_or(0)
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }

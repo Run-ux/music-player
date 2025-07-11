@@ -3,8 +3,7 @@ import { ref, onMounted, watch } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import PlayModeControl from './PlayModeControl.vue';
-
-import { SongInfo } from '../stores/player';
+import { usePlayerStore, SongInfo } from '../stores/player';
 
 const props = defineProps<{
   currentSong: SongInfo | null;
@@ -21,6 +20,10 @@ const emit = defineEmits<{
 const position = ref(0);
 const duration = ref(0);
 const progress = ref(0);
+const isUserJumping = ref(false); // 跳转保护标志
+
+// 获取playerStore
+const playerStore = usePlayerStore();
 
 // 播放控制 - 合并播放和暂停为一个切换功能
 const handlePlayPause = () => {
@@ -39,7 +42,7 @@ const handlePrevious = () => {
   emit('previous');
 };
 
-// 进度条点击跳转功能
+// 进度条点击跳转功能 - 完全重写
 const handleProgressClick = (event: MouseEvent) => {
   if (!duration.value || !props.currentSong) return;
   
@@ -52,14 +55,23 @@ const handleProgressClick = (event: MouseEvent) => {
   const clickPercent = Math.max(0, Math.min(1, clickX / progressWidth));
   const targetPosition = Math.floor(clickPercent * duration.value);
   
-  console.log(`进度条点击跳转: ${targetPosition}秒 (${(clickPercent * 100).toFixed(1)}%), 基于时长: ${duration.value}秒`);
+  console.log(`主进度条点击跳转: ${targetPosition}秒`);
   
-  // 立即更新前端显示，给用户即时反馈
+  // 关键修复：立即设置保护标志，防止任何干扰
+  isUserJumping.value = true;
+  
+  // 立即更新显示，确保用户看到即时反馈
   position.value = targetPosition;
   progress.value = clickPercent * 100;
   
-  // 调用跳转命令
-  seekTo(targetPosition);
+  // 调用智能跳转 - 这会根据播放模式选择正确的处理方式
+  playerStore.seekTo(targetPosition);
+  
+  // 延长保护时间，确保完全避免干扰
+  setTimeout(() => {
+    isUserJumping.value = false;
+    console.log('跳转保护解除');
+  }, 1500);
 };
 
 // 进度条拖拽功能
@@ -109,19 +121,18 @@ const handleMouseUp = (_event: MouseEvent) => {
   document.removeEventListener('mousemove', handleMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
   
-  // 执行跳转
+  // 执行跳转时也设置保护
+  isUserJumping.value = true;
   const targetPosition = Math.floor((progress.value / 100) * duration.value);
-  seekTo(targetPosition);
-};
-
-// 跳转到指定位置
-const seekTo = async (targetPosition: number) => {
-  try {
-    await invoke('seek_to', { position: targetPosition });
-    console.log('跳转到:', targetPosition, '秒');
-  } catch (error) {
-    console.error('跳转失败:', error);
-  }
+  
+  console.log(`主进度条拖拽跳转: ${targetPosition}秒`);
+  playerStore.seekTo(targetPosition);
+  
+  // 拖拽后的保护时间
+  setTimeout(() => {
+    isUserJumping.value = false;
+    console.log('拖拽跳转保护解除');
+  }, 1200);
 };
 
 // 格式化时间
@@ -134,6 +145,12 @@ const formatTime = (seconds: number) => {
 // 监听进度更新事件
 onMounted(async () => {
   await listen('player-event', (event: any) => {
+    // 如果用户正在跳转，忽略后端事件，防止干扰
+    if (isUserJumping.value) {
+      console.log('用户正在跳转，忽略后端进度事件');
+      return;
+    }
+    
     const payload = event.payload;
     
     // 处理新的事件格式
@@ -166,6 +183,16 @@ onMounted(async () => {
     }
   });
 });
+
+// 新增：直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
+watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDuration]) => {
+  // 只有在不是用户拖拽且不是用户跳转时才更新进度条
+  if (!isDragging.value && !isUserJumping.value) {
+    position.value = newPosition;
+    duration.value = newDuration;
+    progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+  }
+}, { immediate: true });
 
 // 监听当前歌曲变化，确保props变化时也重置进度条
 watch(() => props.currentSong, (newSong, oldSong) => {
