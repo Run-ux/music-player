@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from "vue";
+import { onMounted, computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { usePlayerStore, PlayerState, SongInfo, MediaType } from "./stores/player";
@@ -8,6 +8,7 @@ import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
 import LyricsDisplay from "./components/LyricsDisplay.vue";
 import VideoPlayer from "./components/VideoPlayer.vue";
+import StarWarsTitles from "./components/StarWarsTitles.vue"; // 新增导入
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
@@ -176,74 +177,86 @@ const handleLyricsSeek = (time: number) => {
   playerStore.seekTo(time);
 };
 
+// 新增：入场动画状态
+const showIntro = ref(true); // 新增：入场动画状态
+
 // 组件挂载时初始化
 onMounted(() => {
-  initPlayer();
-  
-  // 初始化播放模式
-  playerStore.initializePlaybackMode();
-  
-  // 添加默认专辑图片
-  const link = document.createElement('link');
-  link.rel = 'preload';
-  link.href = '/default-album.png';
-  link.as = 'image';
-  document.head.appendChild(link);
+  // 新增：播放星球大战动画，动画结束后进入主界面
+  showIntro.value = true;
+  setTimeout(() => {
+    showIntro.value = false;
+    // 动画结束后再初始化播放器
+    initPlayer();
+    playerStore.initializePlaybackMode();
+    // 添加默认专辑图片
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.href = '/default-album.png';
+    link.as = 'image';
+    document.head.appendChild(link);
+  }, 11000); // 动画时长约11秒（可根据StarWars动画实际调整）
 });
 </script>
 
 <template>
   <div class="app">
-    <header class="app-header">
-      <h1>音乐播放器</h1>
-    </header>
-    
-    <main class="app-content">
-      <div class="left-panel">
-        <NowPlaying 
-          :song="playerStore.currentSong" 
-          :is-playing="playerStore.isPlaying" 
-        />
-        <PlayerControls 
-          :current-song="playerStore.currentSong"
-          :is-playing="playerStore.isPlaying"
-          @play="handlePlay"
-          @pause="handlePause"
-          @next="handleNext"
-          @previous="handlePrevious"
-        />
+    <!-- 新增：入场动画 -->
+    <transition name="fade" mode="out-in">
+      <StarWarsTitles v-if="showIntro" />
+      <div v-else>
+        <!-- 主界面内容包裹在一个div里 -->
+        <header class="app-header">
+          <h1>音乐播放器</h1>
+        </header>
+        <main class="app-content">
+          <div class="left-panel">
+            <NowPlaying 
+              :song="playerStore.currentSong" 
+              :is-playing="playerStore.isPlaying" 
+            />
+            <PlayerControls 
+              :current-song="playerStore.currentSong"
+              :is-playing="playerStore.isPlaying"
+              @play="handlePlay"
+              @pause="handlePause"
+              @next="handleNext"
+              @previous="handlePrevious"
+            />
+          </div>
+          
+          <div class="center-panel">
+            <!-- 根据播放模式和媒体类型显示不同组件 -->
+            <VideoPlayer
+              v-if="shouldShowVideo"
+              :song="playerStore.currentSong"
+              :is-playing="playerStore.isPlaying"
+            />
+            <LyricsDisplay
+              v-else-if="shouldShowLyrics"
+              :lyrics="playerStore.currentSong?.lyrics"
+              :current-time="playerStore.position"
+              :is-playing="playerStore.isPlaying"
+              @seek="handleLyricsSeek"
+            />
+            <div v-else class="no-content-placeholder">
+              <div class="placeholder-icon">🎵</div>
+              <p>选择歌曲开始播放</p>
+            </div>
+          </div>
+          
+          <div class="right-panel">
+            <Playlist 
+              :playlist="playerStore.playlist" 
+              :current-index="playerStore.currentIndex"
+              :is-playing="playerStore.isPlaying"
+              @select-song="handleSelectSong"
+              @remove-song="handleRemoveSong"
+            />
+          </div>
+        </main>
       </div>
-      
-      <div class="center-panel">
-        <!-- 根据播放模式和媒体类型显示不同组件 -->
-        <VideoPlayer
-          v-if="shouldShowVideo"
-          :song="playerStore.currentSong"
-          :is-playing="playerStore.isPlaying"
-        />
-        <LyricsDisplay
-          v-else-if="shouldShowLyrics"
-          :lyrics="playerStore.currentSong?.lyrics"
-          :current-time="playerStore.position"
-          :is-playing="playerStore.isPlaying"
-          @seek="handleLyricsSeek"
-        />
-        <div v-else class="no-content-placeholder">
-          <div class="placeholder-icon">🎵</div>
-          <p>选择歌曲开始播放</p>
-        </div>
-      </div>
-      
-      <div class="right-panel">
-        <Playlist 
-          :playlist="playerStore.playlist" 
-          :current-index="playerStore.currentIndex"
-          :is-playing="playerStore.isPlaying"
-          @select-song="handleSelectSong"
-          @remove-song="handleRemoveSong"
-        />
-      </div>
-    </main>
+    </transition>
   </div>
 </template>
 
@@ -321,6 +334,27 @@ onMounted(() => {
 .no-content-placeholder p {
   font-size: 1.1rem;
   margin: 0;
+}
+
+.fade-in {
+  animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 新增淡入淡出动画 */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 1s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 
 /* 响应式设计 */
