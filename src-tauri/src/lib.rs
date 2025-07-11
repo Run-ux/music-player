@@ -404,6 +404,9 @@ pub fn run() {
             get_initial_player_state,
             get_video_stream,
             update_video_progress,
+            toggle_playback_mode,
+            set_playback_mode,
+            get_current_playback_mode, // 添加获取当前播放模式的命令
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -433,4 +436,38 @@ async fn update_video_progress(position: u64, duration: u64, _state: tauri::Stat
     }
     
     Ok(())
+}
+
+/// 切换播放模式（音频/MV）
+#[tauri::command]
+async fn toggle_playback_mode(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::TogglePlaybackMode)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 设置播放模式（音频/MV）
+#[tauri::command]
+async fn set_playback_mode(mode: crate::player_fixed::MediaType, _state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::SetPlaybackMode(mode))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 获取当前播放模式
+#[tauri::command]
+async fn get_current_playback_mode(_state: tauri::State<'_, AppState>) -> Result<crate::player_fixed::MediaType, String> {
+    let player_instance = get_player_instance().await?;
+    let _player_state_guard = player_instance.lock().await;
+    // 这里需要从播放器状态中获取当前播放模式
+    // 目前先返回默认的Audio模式，稍后会修复
+    Ok(crate::player_fixed::MediaType::Audio)
 }

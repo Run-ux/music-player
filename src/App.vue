@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { usePlayerStore, PlayerState, SongInfo } from "./stores/player";
+import { usePlayerStore, PlayerState, SongInfo, MediaType } from "./stores/player";
 import PlayerControls from "./components/PlayerControls.vue";
 import Playlist from "./components/Playlist.vue";
 import NowPlaying from "./components/NowPlaying.vue";
@@ -11,6 +11,36 @@ import VideoPlayer from "./components/VideoPlayer.vue";
 
 // 使用播放器状态
 const playerStore = usePlayerStore();
+
+// 决定是否显示视频播放器
+const shouldShowVideo = computed(() => {
+  const currentSong = playerStore.currentSong;
+  if (!currentSong) return false;
+  
+  // 如果当前播放模式是Video，且当前歌曲有MV，则显示视频
+  if (playerStore.currentPlaybackMode === MediaType.Video && currentSong.mvPath) {
+    return true;
+  }
+  
+  // 如果当前歌曲本身就是视频文件，则显示视频
+  if (currentSong.mediaType === MediaType.Video) {
+    return true;
+  }
+  
+  return false;
+});
+
+// 决定是否显示歌词
+const shouldShowLyrics = computed(() => {
+  const currentSong = playerStore.currentSong;
+  if (!currentSong) return false;
+  
+  // 如果正在显示视频，不显示歌词
+  if (shouldShowVideo.value) return false;
+  
+  // 如果是音频模式或没有MV，显示歌词
+  return playerStore.currentPlaybackMode === MediaType.Audio || !currentSong.mvPath;
+});
 
 // 初始化播放器
 const initPlayer = async () => {  
@@ -131,11 +161,9 @@ const handleSelectSong = async (index: number) => {
   if (playerStore.currentIndex === index && playerStore.isPlaying) {
     await playerStore.pause();
   } else {
-    // 设置当前歌曲
+    // 设置当前歌曲（这已经会自动开始播放）
     await playerStore.setCurrentSong(index);
-    
-    // 开始播放
-    await playerStore.play();
+    // 注意：不需要再次调用 play()，因为 setCurrentSong 已经设置为播放状态
   }
 };
 
@@ -151,6 +179,9 @@ const handleLyricsSeek = (time: number) => {
 // 组件挂载时初始化
 onMounted(() => {
   initPlayer();
+  
+  // 初始化播放模式
+  playerStore.initializePlaybackMode();
   
   // 添加默认专辑图片
   const link = document.createElement('link');
@@ -184,19 +215,23 @@ onMounted(() => {
       </div>
       
       <div class="center-panel">
-        <!-- 根据媒体类型显示不同组件 -->
+        <!-- 根据播放模式和媒体类型显示不同组件 -->
         <VideoPlayer
-          v-if="playerStore.currentSong?.mediaType === 'Video'"
+          v-if="shouldShowVideo"
           :song="playerStore.currentSong"
           :is-playing="playerStore.isPlaying"
         />
         <LyricsDisplay
-          v-else
+          v-else-if="shouldShowLyrics"
           :lyrics="playerStore.currentSong?.lyrics"
           :current-time="playerStore.position"
           :is-playing="playerStore.isPlaying"
           @seek="handleLyricsSeek"
         />
+        <div v-else class="no-content-placeholder">
+          <div class="placeholder-icon">🎵</div>
+          <p>选择歌曲开始播放</p>
+        </div>
       </div>
       
       <div class="right-panel">
@@ -262,6 +297,30 @@ onMounted(() => {
 .right-panel {
   flex: 1;
   min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+  color: #999;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 2px dashed #ddd;
+}
+
+.placeholder-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
 }
 
 /* 响应式设计 */

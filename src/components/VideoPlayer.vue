@@ -65,6 +65,33 @@ const getSecureVideoPath = async (filePath: string) => {
   }
 };
 
+// 计算当前应该播放的视频文件路径
+const currentVideoPath = computed(() => {
+  if (!props.song) return '';
+  
+  console.log('计算视频路径:', {
+    song: props.song.title,
+    playbackMode: playerStore.currentPlaybackMode,
+    mvPath: props.song.mvPath,
+    mediaType: props.song.mediaType
+  });
+  
+  // 如果当前播放模式是Video且歌曲有MV，则播放MV
+  if (playerStore.currentPlaybackMode === MediaType.Video && props.song.mvPath) {
+    console.log('使用MV路径:', props.song.mvPath);
+    return props.song.mvPath;
+  }
+  
+  // 如果歌曲本身就是视频文件，则播放歌曲本身
+  if (props.song.mediaType === MediaType.Video) {
+    console.log('使用视频文件路径:', props.song.path);
+    return props.song.path;
+  }
+  
+  console.log('无视频路径可用');
+  return '';
+});
+
 // 监听播放状态变化 - 与主播放器完全同步
 watch(() => props.isPlaying, async (isPlaying) => {
   if (videoElement.value && isVideoLoaded.value) {
@@ -102,18 +129,49 @@ watch(() => props.song?.path, async (newPath, oldPath) => {
   }
 }, { immediate: true });
 
+// 监听当前视频路径变化
+watch(currentVideoPath, async (newPath, oldPath) => {
+  if (newPath && newPath !== oldPath) {
+    isVideoLoaded.value = false;
+    loadingError.value = '';
+    isVideoPlaying.value = false;
+    console.log('切换视频文件:', newPath);
+    
+    const secureUrl = await getSecureVideoPath(newPath);
+    if (secureUrl) {
+      videoSrc.value = secureUrl;
+      if (videoElement.value) {
+        videoElement.value.load();
+      }
+    }
+  }
+}, { immediate: true });
+
 // 处理视频加载完成
 const handleVideoLoaded = () => {
   console.log('视频加载完成，可以播放');
   isVideoLoaded.value = true;
   loadingError.value = '';
   
-  // 如果主播放器处于播放状态，自动开始播放视频
-  if (props.isPlaying && videoElement.value) {
+  // 优化：视频加载完成后立即开始播放（无论主播放器状态如何）
+  if (videoElement.value) {
     videoElement.value.play().then(() => {
       isVideoPlaying.value = true;
-      console.log('视频自动开始播放');
-    }).catch(console.error);
+      console.log('新视频自动开始播放');
+      
+      // 确保主播放器状态同步为播放
+      if (!props.isPlaying) {
+        playerStore.play();
+      }
+    }).catch((error) => {
+      console.warn('视频自动播放失败，可能需要用户交互:', error);
+      // 如果自动播放失败，但主播放器是播放状态，仍然尝试播放
+      if (props.isPlaying) {
+        setTimeout(() => {
+          videoElement.value?.play().catch(console.error);
+        }, 100);
+      }
+    });
   }
 };
 
@@ -151,18 +209,12 @@ const handleTimeUpdate = () => {
       actualVideoDuration.value = videoDuration;
     }
     
-    // 只有在视频真正播放时才更新进度（避免拖拽干扰）
-    if (!videoElement.value.paused && isVideoPlaying.value) {
-      // 同步到主播放器进度，使用实际视频时长
+    // 只要视频在播放，就持续更新进度到主进度条
+    if (!videoElement.value.paused && isVideoPlaying.value && !isUserSeeking.value) {
+      // 关键修复：确保主进度条实时更新
       playerStore.updateProgress(currentTime, videoDuration);
       // 同时发送到后端，确保后端状态同步
       sendProgressToBackend(currentTime, videoDuration);
-      
-      // 减少日志输出频率，只在整秒变化时输出
-      if (currentTime !== lastLoggedTime.value) {
-        console.log('视频进度同步:', currentTime, '/', videoDuration);
-        lastLoggedTime.value = currentTime;
-      }
     }
   }
 };
@@ -173,43 +225,52 @@ const lastLoggedTime = ref(-1);
 // 添加跳转控制标志，避免循环触发
 const isUserSeeking = ref(false);
 const lastSeekPosition = ref(-1);
+const isPlayerControlsJumping = ref(false); // 新增：主进度条跳转标志
 
-// 监听主播放器的position变化来实现进度条跳转
+// 监听主播放器的position变化来实现进度条跳转 - 完全重写
 watch(() => playerStore.position, (newPosition, oldPosition) => {
   if (videoElement.value && isVideoLoaded.value && !isUserSeeking.value) {
     const currentVideoTime = Math.floor(videoElement.value.currentTime);
     
-    // 检测是否是用户主动跳转（位置差异大且不是自然播放进度）
+    // 更精确的跳转检测逻辑
     const positionDiff = Math.abs(newPosition - currentVideoTime);
-    const isSignificantJump = positionDiff > 2;
+    const isSignificantJump = positionDiff > 3; // 提高阈值到3秒
     const isNotNaturalProgress = Math.abs(newPosition - oldPosition) > 2;
     
     if (isSignificantJump && isNotNaturalProgress) {
-      console.log('检测到进度条跳转，视频跳转到:', newPosition, '秒');
+      console.log('VideoPlayer: 检测到主进度条跳转，视频跳转到:', newPosition, '秒');
+      
+      // 设置跳转标志
       isUserSeeking.value = true;
-      lastSeekPosition.value = newPosition;
+      isPlayerControlsJumping.value = true;
+      
+      // 执行视频跳转
       videoElement.value.currentTime = newPosition;
       
-      // 延迟重置标志
+      // 缩短重置时间，提高响应性
       setTimeout(() => {
         isUserSeeking.value = false;
+        isPlayerControlsJumping.value = false;
+        console.log('VideoPlayer: 跳转标志重置');
       }, 200);
     }
   }
 });
 
-// 新增：监听视频跳转事件，同步进度
+// 新增：监听视频跳转事件，同步进度到主进度条
 const handleVideoSeek = () => {
-  if (videoElement.value && actualVideoDuration.value > 0 && !isUserSeeking.value) {
+  // 只有在不是主进度条触发的跳转时才处理
+  if (videoElement.value && actualVideoDuration.value > 0 && !isPlayerControlsJumping.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
     const duration = actualVideoDuration.value;
     
-    console.log('视频手动跳转，同步进度:', currentTime);
+    console.log('VideoPlayer: 视频内置进度条跳转，同步到主进度条:', currentTime);
     
     // 设置标志避免循环触发
     isUserSeeking.value = true;
+    
+    // 只更新前端状态，不发送到后端
     playerStore.updateProgress(currentTime, duration);
-    sendProgressToBackend(currentTime, duration);
     
     setTimeout(() => {
       isUserSeeking.value = false;
@@ -261,8 +322,70 @@ const handleVideoLoadedMetadata = () => {
       // 新增：更新PlayerStore中的视频时长缓存，让播放列表能显示正确时长
       playerStore.updateVideoDuration(props.song.path, videoDuration);
     }
+    
+    // 优化：元数据加载完成后，如果视频已经加载完成但还没开始播放，立即开始播放
+    if (isVideoLoaded.value && !isVideoPlaying.value) {
+      console.log('元数据加载完成，尝试开始播放视频');
+      videoElement.value.play().then(() => {
+        isVideoPlaying.value = true;
+        console.log('视频在元数据加载后自动开始播放');
+        
+        // 确保主播放器状态同步为播放
+        if (!props.isPlaying) {
+          playerStore.play();
+        }
+      }).catch((error) => {
+        console.warn('元数据加载后视频自动播放失败:', error);
+      });
+    }
   }
 };
+
+// 监听播放模式变化，确保模式切换时重新加载视频
+watch(() => playerStore.currentPlaybackMode, async (newMode, oldMode) => {
+  if (newMode !== oldMode) {
+    console.log('播放模式变化:', oldMode, '->', newMode);
+    
+    // 如果切换到视频模式且有视频路径，重新加载视频
+    if (newMode === MediaType.Video && currentVideoPath.value) {
+      console.log('切换到视频模式，重新加载视频:', currentVideoPath.value);
+      
+      // 重置视频状态
+      isVideoLoaded.value = false;
+      loadingError.value = '';
+      isVideoPlaying.value = false;
+      
+      const secureUrl = await getSecureVideoPath(currentVideoPath.value);
+      if (secureUrl) {
+        videoSrc.value = secureUrl;
+        if (videoElement.value) {
+          videoElement.value.load();
+          
+          // 关键修复：等待视频加载完成后立即开始播放
+          videoElement.value.addEventListener('loadeddata', () => {
+            if (props.isPlaying && videoElement.value) {
+              videoElement.value.play().then(() => {
+                isVideoPlaying.value = true;
+                console.log('模式切换后视频自动开始播放');
+              }).catch(console.error);
+            }
+          }, { once: true });
+        }
+      }
+    } else if (newMode === MediaType.Audio) {
+      console.log('切换到音频模式，清理视频资源');
+      // 切换到音频模式时，完全停止视频播放并清理资源
+      if (videoElement.value) {
+        videoElement.value.pause();
+        videoElement.value.currentTime = 0;
+        videoElement.value.src = '';
+      }
+      videoSrc.value = '';
+      isVideoLoaded.value = false;
+      isVideoPlaying.value = false;
+    }
+  }
+}, { immediate: true });
 
 onMounted(() => {
   console.log('VideoPlayer组件挂载完成');
@@ -276,9 +399,9 @@ onUnmounted(() => {
 <template>
   <div class="video-player">
     <div class="video-container">
-      <!-- 优化的视频元素 - 启用所有原生控制功能 -->
+      <!-- 优化的视频元素 - 根据当前视频路径显示 -->
       <video
-        v-if="props.song?.mediaType === MediaType.Video && videoSrc"
+        v-if="currentVideoPath && videoSrc"
         ref="videoElement"
         class="video-element"
         :src="videoSrc"
@@ -299,11 +422,11 @@ onUnmounted(() => {
       </video>
       
       <!-- 视频加载中状态 -->
-      <div v-if="!isVideoLoaded && props.song?.mediaType === MediaType.Video && !loadingError" class="video-loading">
+      <div v-if="!isVideoLoaded && currentVideoPath && !loadingError" class="video-loading">
         <div class="loading-spinner"></div>
         <p>正在加载视频...</p>
         <p class="video-info">{{ songTitle }}</p>
-        <p class="debug-info">文件: {{ props.song?.path }}</p>
+        <p class="debug-info">文件: {{ currentVideoPath }}</p>
       </div>
       
       <!-- 错误状态 -->
@@ -327,6 +450,15 @@ onUnmounted(() => {
         </span>
         <span v-if="displayDuration > 0" class="duration-info">
           时长: {{ formatDuration(displayDuration) }}
+        </span>
+      </div>
+      <!-- 显示当前播放模式 -->
+      <div class="playback-mode-info">
+        <span v-if="playerStore.currentPlaybackMode === MediaType.Video && props.song?.mvPath" class="mode-badge mv-mode">
+          🎬 MV模式
+        </span>
+        <span v-else-if="props.song?.mediaType === MediaType.Video" class="mode-badge video-mode">
+          📹 视频文件
         </span>
       </div>
     </div>
@@ -503,5 +635,32 @@ onUnmounted(() => {
   color: rgba(255, 255, 255, 0.7);
   margin: 0.2rem 0;
   word-break: break-all;
+}
+
+/* 播放模式指示器样式 */
+.playback-mode-info {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.mode-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.mv-mode {
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.video-mode {
+  background: rgba(33, 150, 243, 0.2);
 }
 </style>
