@@ -150,16 +150,7 @@ onUnmounted(() => {
           class="cover-image"
           @error="($event.target as HTMLImageElement).src = '/src/assets/default-cover.jpg'"
         />
-        <div class="cover-overlay" v-if="isPlaying">
-          <div class="play-indicator">
-            <div class="sound-waves">
-              <div class="wave"></div>
-              <div class="wave"></div>
-              <div class="wave"></div>
-              <div class="wave"></div>
-            </div>
-          </div>
-        </div>
+        
       </div>
     </div>
     

@@ -314,26 +314,24 @@ onMounted(() => {
 }
 
 .left-panel {
-  flex: 0 0 380px;
+  flex: 3;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  min-width: 350px;
-  max-width: 420px;
+  min-width: 300px;
   height: 100%;
 }
 
 .center-panel {
-  flex: 1;
+  flex: 4;
   display: flex;
   flex-direction: column;
   min-width: 350px;
 }
 
 .right-panel {
-  flex: 0 0 350px;
-  min-width: 320px;
-  max-width: 380px;
+  flex: 3;
+  min-width: 300px;
 }
 
 .no-content-placeholder {
