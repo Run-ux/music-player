@@ -153,7 +153,7 @@ const handleVideoLoaded = () => {
   isVideoLoaded.value = true;
   loadingError.value = '';
   
-  // 优化：视频加载完成后立即开始播放（无论主播放器状态如何）
+  //视频加载完成后立即开始播放（无论主播放器状态如何）
   if (videoElement.value) {
     videoElement.value.play().then(() => {
       isVideoPlaying.value = true;
@@ -185,7 +185,7 @@ const handleVideoError = (event: Event) => {
   isVideoPlaying.value = false;
 };
 
-// 新增：直接向后端发送进度更新的函数
+// 直接向后端发送进度更新的函数
 const sendProgressToBackend = async (position: number, duration: number) => {
   try {
     // 通过 invoke 调用后端接口发送进度更新
@@ -227,7 +227,7 @@ const isUserSeeking = ref(false);
 const lastSeekPosition = ref(-1);
 const isPlayerControlsJumping = ref(false); // 新增：主进度条跳转标志
 
-// 监听主播放器的position变化来实现进度条跳转 - 完全重写
+// 监听主播放器的position变化来实现进度条跳转
 watch(() => playerStore.position, (newPosition, oldPosition) => {
   if (videoElement.value && isVideoLoaded.value && !isUserSeeking.value) {
     const currentVideoTime = Math.floor(videoElement.value.currentTime);

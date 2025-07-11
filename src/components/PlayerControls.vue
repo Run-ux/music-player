@@ -42,7 +42,7 @@ const handlePrevious = () => {
   emit('previous');
 };
 
-// 进度条点击跳转功能 - 完全重写
+// 进度条点击跳转功能
 const handleProgressClick = (event: MouseEvent) => {
   if (!duration.value || !props.currentSong) return;
   
@@ -64,7 +64,7 @@ const handleProgressClick = (event: MouseEvent) => {
   position.value = targetPosition;
   progress.value = clickPercent * 100;
   
-  // 调用智能跳转 - 这会根据播放模式选择正确的处理方式
+  // 调用智能跳转
   playerStore.seekTo(targetPosition);
   
   // 延长保护时间，确保完全避免干扰
@@ -184,7 +184,7 @@ onMounted(async () => {
   });
 });
 
-// 新增：直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
+// 直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
 watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDuration]) => {
   // 只有在不是用户拖拽且不是用户跳转时才更新进度条
   if (!isDragging.value && !isUserJumping.value) {
@@ -294,8 +294,8 @@ watch(() => props.currentSong, (newSong, oldSong) => {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 12px; /* 从14px减小到12px */
-  height: 12px; /* 从14px减小到12px */
+  width: 12px;
+  height: 12px;
   background: #4caf50;
   border: 2px solid #fff;
   border-radius: 50%;

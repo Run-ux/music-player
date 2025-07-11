@@ -109,7 +109,6 @@ const initPlayer = async () => {
           default:
             console.warn('Unknown event type:', payload.type);        }
       } else {
-        // 兼容旧格式
         if (payload.StateChanged) {
           playerStore.updateState(payload.StateChanged);
         }
@@ -163,7 +162,6 @@ const handleSelectSong = async (index: number) => {
   } else {
     // 设置当前歌曲（这已经会自动开始播放）
     await playerStore.setCurrentSong(index);
-    // 注意：不需要再次调用 play()，因为 setCurrentSong 已经设置为播放状态
   }
 };
 
