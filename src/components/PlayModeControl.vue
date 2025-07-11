@@ -72,7 +72,12 @@ onMounted(async () => {
   <div class="play-mode-control">
     <button 
       @click="togglePlayMode" 
-      class="mode-button"
+      class="mode-button btn btn-secondary"
+      :class="{ 
+        'mode-sequential': currentMode === 'Sequential',
+        'mode-repeat': currentMode === 'Repeat',
+        'mode-shuffle': currentMode === 'Shuffle'
+      }"
       :title="modeInfo.description"
     >
       <span class="mode-icon">{{ modeInfo.icon }}</span>
@@ -85,67 +90,112 @@ onMounted(async () => {
 .play-mode-control {
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .mode-button {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: #f8f9fa;
-  color: #333;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
-  min-width: 120px;
   justify-content: center;
+  gap: 0.5rem;
+  min-width: 140px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.mode-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  border-radius: var(--radius-md);
+}
+
+.mode-button.mode-sequential::after {
+  background: linear-gradient(135deg, rgba(33, 150, 243, 0.15), rgba(33, 150, 243, 0.1));
+}
+
+.mode-button.mode-repeat::after {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.15), rgba(255, 152, 0, 0.1));
+}
+
+.mode-button.mode-shuffle::after {
+  background: linear-gradient(135deg, rgba(156, 39, 176, 0.15), rgba(156, 39, 176, 0.1));
+}
+
+.mode-button:hover::after {
+  opacity: 1;
+}
+
+.mode-button.mode-sequential {
+  border-color: rgba(33, 150, 243, 0.3);
+  color: #2196F3;
+}
+
+.mode-button.mode-repeat {
+  border-color: rgba(255, 152, 0, 0.3);
+  color: #FF9800;
+}
+
+.mode-button.mode-shuffle {
+  border-color: rgba(156, 39, 176, 0.3);
+  color: #9C27B0;
 }
 
 .mode-button:hover {
-  background: #e9ecef;
-  border-color: #4caf50;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
-.mode-button:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+.mode-button.mode-sequential:hover {
+  border-color: #2196F3;
+  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.2);
+}
+
+.mode-button.mode-repeat:hover {
+  border-color: #FF9800;
+  box-shadow: 0 4px 16px rgba(255, 152, 0, 0.2);
+}
+
+.mode-button.mode-shuffle:hover {
+  border-color: #9C27B0;
+  box-shadow: 0 4px 16px rgba(156, 39, 176, 0.2);
 }
 
 .mode-icon {
   font-size: 1.1rem;
+  position: relative;
+  z-index: 2;
+  transition: transform var(--transition-normal);
+}
+
+.mode-button:hover .mode-icon {
+  transform: scale(1.1);
 }
 
 .mode-text {
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
+  position: relative;
+  z-index: 2;
 }
 
-/* 不同模式的特殊样式 */
-.mode-button[title*="顺序播放"] {
-  border-color: #2196F3;
-}
-
-.mode-button[title*="单曲循环"] {
-  border-color: #FF9800;
-}
-
-.mode-button[title*="随机播放"] {
-  border-color: #9C27B0;
-}
-
-.mode-button[title*="顺序播放"]:hover {
-  background: rgba(33, 150, 243, 0.1);
-}
-
-.mode-button[title*="单曲循环"]:hover {
-  background: rgba(255, 152, 0, 0.1);
-}
-
-.mode-button[title*="随机播放"]:hover {
-  background: rgba(156, 39, 176, 0.1);
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .mode-button {
+    min-width: 120px;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.8rem;
+  }
+  
+  .mode-icon {
+    font-size: 1rem;
+  }
 }
 </style>

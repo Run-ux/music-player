@@ -138,7 +138,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="now-playing">
+  <div class="now-playing card">
     <div class="album-cover">
       <div 
         ref="coverElement"
@@ -150,6 +150,16 @@ onUnmounted(() => {
           class="cover-image"
           @error="($event.target as HTMLImageElement).src = '/src/assets/default-cover.jpg'"
         />
+        <div class="cover-overlay" v-if="isPlaying">
+          <div class="play-indicator">
+            <div class="sound-waves">
+              <div class="wave"></div>
+              <div class="wave"></div>
+              <div class="wave"></div>
+              <div class="wave"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     
@@ -158,12 +168,12 @@ onUnmounted(() => {
       <div class="song-artist">{{ songArtist }}</div>
       <div class="song-album">{{ songAlbum }}</div>
       
-      <!-- 播放模式切换按钮 - 横向排列在歌曲信息下方 -->
+      <!-- 播放模式切换按钮 -->
       <div v-if="supportsModeSwitch" class="mode-switch-controls">
         <button 
           @click="togglePlaybackMode"
-          class="mode-switch-btn"
-          :class="{ 'active': !isVideoMode }"
+          class="mode-switch-btn btn-secondary"
+          :class="{ 'btn-primary': !isVideoMode, 'active': !isVideoMode }"
           :title="'音频模式'"
         >
           <svg class="mode-icon" viewBox="0 0 24 24">
@@ -174,8 +184,8 @@ onUnmounted(() => {
         
         <button 
           @click="togglePlaybackMode"
-          class="mode-switch-btn"
-          :class="{ 'active': isVideoMode }"
+          class="mode-switch-btn btn-secondary"
+          :class="{ 'btn-primary': isVideoMode, 'active': isVideoMode }"
           :title="'MV模式'"
         >
           <svg class="mode-icon" viewBox="0 0 24 24">
@@ -193,17 +203,19 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  padding: 1.25rem;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .album-cover {
   width: 100%;
-  max-width: 300px;
-  margin-bottom: 1.5rem;
+  max-width: 240px;
+  margin-bottom: 1.25rem;
   position: relative;
+  flex-shrink: 0;
 }
 
 .cover-container {
@@ -212,8 +224,9 @@ onUnmounted(() => {
   position: relative;
   border-radius: 50%;
   overflow: hidden;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
   transform-origin: center center;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
 }
 
 .cover-image {
@@ -223,48 +236,110 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: all var(--transition-normal);
+}
+
+.cover-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  backdrop-filter: blur(2px);
+}
+
+.play-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sound-waves {
+  display: flex;
+  gap: 3px;
+  height: 24px;
+  align-items: end;
+}
+
+.wave {
+  width: 4px;
+  background: var(--primary-gradient);
+  border-radius: 2px;
+  animation: wave 1.5s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
+
+.wave:nth-child(1) { animation-delay: 0s; }
+.wave:nth-child(2) { animation-delay: 0.2s; }
+.wave:nth-child(3) { animation-delay: 0.4s; }
+.wave:nth-child(4) { animation-delay: 0.6s; }
+
+@keyframes wave {
+  0%, 100% { height: 8px; }
+  50% { height: 24px; }
 }
 
 .song-details {
   text-align: center;
   width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.625rem;
+  min-height: 0;
 }
 
 .song-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-bottom: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #333;
+  color: var(--text-primary);
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .song-artist {
-  font-size: 1.1rem;
-  color: #555;
-  margin-bottom: 0.25rem;
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .song-album {
   font-size: 0.9rem;
-  color: #777;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0;
+  background: var(--background-glass);
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(10px);
 }
 
-/* 播放模式切换按钮样式 - 横向排列 */
 .mode-switch-controls {
   display: flex;
   justify-content: center;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  gap: 0.625rem;
+  margin-top: auto;
+  padding-top: 1rem;
   width: 100%;
+  flex-shrink: 0;
 }
 
 .mode-switch-btn {
@@ -272,47 +347,40 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  background: rgba(255, 255, 255, 0.8);
-  border: 2px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(5px);
+  transition: all var(--transition-normal);
   min-width: 80px;
-  color: #666;
-}
-
-.mode-switch-btn:hover {
-  transform: translateY(-2px);
-  background: rgba(255, 255, 255, 0.95);
-  border-color: rgba(102, 126, 234, 0.3);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  position: relative;
+  overflow: hidden;
 }
 
 .mode-switch-btn.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-color: #667eea;
+  background: var(--primary-gradient);
   color: white;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+  box-shadow: var(--shadow-primary);
+  border-color: transparent;
 }
 
-.mode-switch-btn.active:hover {
-  transform: translateY(-2px);
-  background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+.mode-switch-btn.active .mode-icon {
+  fill: white;
 }
 
 .mode-icon {
-  width: 24px;
-  height: 24px;
-  fill: currentColor;
-  transition: all 0.3s ease;
+  width: 22px;
+  height: 22px;
+  fill: var(--text-secondary);
+  transition: all var(--transition-normal);
 }
 
 .mode-switch-btn:hover .mode-icon {
   transform: scale(1.1);
+  fill: var(--primary-color);
+}
+
+.mode-switch-btn.active:hover .mode-icon {
+  fill: white;
 }
 
 .mode-text {
@@ -323,33 +391,52 @@ onUnmounted(() => {
 
 /* 响应式设计 */
 @media (max-width: 480px) {
+  .now-playing {
+    padding: 1rem 0.875rem;
+  }
+  
+  .album-cover {
+    max-width: 160px;
+    margin-bottom: 0.875rem;
+  }
+  
   .song-title {
-    font-size: 1.3rem;
+    font-size: 1.1rem;
+  }
+  
+  .song-artist {
+    font-size: 0.9rem;
+  }
+  
+  .song-album {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
   }
   
   .mode-switch-controls {
-    gap: 0.5rem;
+    gap: 0.375rem;
+    padding-top: 0.625rem;
   }
   
   .mode-switch-btn {
     padding: 0.625rem 0.75rem;
-    min-width: 70px;
+    min-width: 65px;
   }
   
   .mode-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
   }
   
   .mode-text {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
   }
 }
 
 /* 触摸设备优化 */
 @media (hover: none) and (pointer: coarse) {
   .mode-switch-btn {
-    padding: 0.875rem 1rem;
+    padding: 1rem 1.25rem;
   }
   
   .mode-switch-btn:hover {
