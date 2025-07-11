@@ -28,30 +28,13 @@ const playerStore = usePlayerStore();
 const handlePlayPause = () => {
   console.log('🎮 播放/暂停按钮点击，当前状态:', props.isPlaying);
   
-  // 关键修复：立即更新UI状态，避免延迟感
-  const willBePlaying = !props.isPlaying;
-  
-  if (willBePlaying) {
-    console.log('🎬 用户点击播放');
-    emit('play');
-  } else {
+  // 关键修复：直接使用简化的播放状态，避免复杂判断
+  if (props.isPlaying) {
     console.log('⏸️ 用户点击暂停');
     emit('pause');
-  }
-  
-  // 新增：对于视频模式，增加额外的状态确认
-  const isVideoMode = props.currentSong?.mediaType === 'Video' || 
-                     (playerStore.currentPlaybackMode === 'Video' && props.currentSong?.mvPath);
-  
-  if (isVideoMode) {
-    console.log('🎬 视频模式播放控制，确保状态同步');
-    // 延迟检查状态一致性
-    setTimeout(() => {
-      // 检查是否需要状态修正
-      if (playerStore.isPlaying !== willBePlaying) {
-        console.log('🔧 播放键：检测到状态不一致，可能需要重试');
-      }
-    }, 200);
+  } else {
+    console.log('🎬 用户点击播放');
+    emit('play');
   }
 };
 

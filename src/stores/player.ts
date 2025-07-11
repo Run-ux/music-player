@@ -60,6 +60,18 @@ export const usePlayerStore = defineStore('player', () => {
   const positionUpdateCount = ref(0); // 进度更新计数器
   const isNewSong = ref(false); // 是否是新歌曲开始
   
+  // 关键修复：简化播放状态检测逻辑
+  const isReallyPlaying = computed(() => {
+    // 基础判断：如果状态不是播放，肯定不在播放
+    if (state.value !== PlayerState.Playing) return false;
+    
+    // 如果正在跳转，使用设定的播放状态
+    if (isTransitioning.value) return true;
+    
+    // 关键修复：立即信任后端状态，减少复杂的前端检测
+    return true;
+  });
+  
   // 新增：音视频互斥播放控制
   const isVideoPlayerActive = ref(false); // 视频播放器是否激活
   const isAudioPlayerActive = ref(false); // 音频播放器是否激活
@@ -102,26 +114,6 @@ export const usePlayerStore = defineStore('player', () => {
   
   // 计算属性
   const isPlaying = computed(() => state.value === PlayerState.Playing);
-  
-  // 新增：智能检测是否真正在播放（更精确的逻辑）
-  const isReallyPlaying = computed(() => {
-    // 如果不是播放状态，肯定不在播放
-    if (!isPlaying.value) return false;
-    
-    // 如果正在跳转，不显示播放状态
-    if (isTransitioning.value) return false;
-    
-    // 强制互斥检查
-    ensureMutualExclusion();
-    
-    // 如果是新歌曲且播放很快开始，直接显示播放状态
-    if (isNewSong.value && isActuallyPlaying.value) {
-      return true;
-    }
-    
-    // 对于跳转后的情况，需要更严格的检测
-    return isActuallyPlaying.value && positionUpdateCount.value >= 2;
-  });
   
   const progress = computed(() => {
     if (!duration.value) return 0;
@@ -456,62 +448,23 @@ export const usePlayerStore = defineStore('player', () => {
   };
   
   const updateProgress = (pos: number, dur: number) => {
-    const now = Date.now();
-    
+    // 关键修复：简化进度更新逻辑，避免复杂的状态检测导致播放键跳跃
     position.value = pos;
     duration.value = dur;
     
-    // 检测是否是新歌曲（进度从0开始且持续时间发生变化）
+    // 关键修复：移除复杂的播放状态检测逻辑
+    // 直接信任后端状态，避免前端过度干预导致状态不一致
+    
+    // 只保留必要的新歌曲检测
     if (pos === 0 && dur !== duration.value) {
       isNewSong.value = true;
-      positionUpdateCount.value = 0;
       console.log('检测到新歌曲开始');
-    } else if (pos > 2) { // 播放超过2秒后不再认为是新歌
+    } else if (pos > 2) {
       isNewSong.value = false;
     }
     
-    // 对于视频文件，使用更宽松的播放检测逻辑
-    const currentSong = playlist.value[currentIndex.value || 0];
-    const isVideo = currentSong?.mediaType === MediaType.Video;
-    
-    // 检测进度是否在更新（说明真正在播放）
-    if (pos > lastPosition.value && pos > 0) {
-      isActuallyPlaying.value = true;
-      lastPositionUpdate.value = now;
-      positionUpdateCount.value++;
-      
-      // 关键修复：确保播放状态一致性
-      if (state.value !== PlayerState.Playing && positionUpdateCount.value >= 2) {
-        console.log('🔧 检测到正在播放但状态不是播放，修正状态');
-        state.value = PlayerState.Playing;
-      }
-      
-      // 视频文件或新歌曲快速开始播放的情况
-      if ((isVideo || isNewSong.value) && positionUpdateCount.value >= 1) {
-        console.log(isVideo ? '视频播放状态确认' : '新歌曲快速开始播放');
-      }
-    } else if (Math.abs(pos - lastPosition.value) > 1) {
-      // 如果位置跳跃很大（可能是跳转），重置计数器
-      positionUpdateCount.value = 0;
-      isActuallyPlaying.value = false;
-      console.log('检测到位置跳跃，重置播放状态');
-    } else if (now - lastPositionUpdate.value > (isVideo ? 3000 : 2000)) {
-      // 关键修复：如果长时间没有进度更新且当前是播放状态，检查是否需要修正
-      if (state.value === PlayerState.Playing) {
-        console.log('⚠️ 长时间无进度更新但状态为播放，可能需要状态修正');
-        // 不立即修改状态，给一些缓冲时间
-        setTimeout(() => {
-          if (now - lastPositionUpdate.value > (isVideo ? 5000 : 3000) && 
-              state.value === PlayerState.Playing) {
-            console.log('🔧 确认无播放活动，修正状态为暂停');
-            state.value = PlayerState.Paused;
-            isActuallyPlaying.value = false;
-          }
-        }, 1000);
-      }
-      isActuallyPlaying.value = false;
-      positionUpdateCount.value = 0;
-    }
+    // 关键修复：移除自动状态修正逻辑，避免干扰用户操作
+    // 让后端完全控制播放状态，前端只负责显示
     
     lastPosition.value = pos;
   };
