@@ -5,7 +5,7 @@ use std::sync::{Arc, Once};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
-// 简化的播放器包装器
+// 播放器包装器
 pub struct PlayerWrapper {
     pub player: Arc<AudioPlayer>,
 }

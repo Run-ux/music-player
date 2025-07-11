@@ -67,7 +67,7 @@ const togglePlaybackMode = async () => {
   }
 };
 
-// 简化封面旋转控制逻辑 - 只要是播放状态就旋转
+//只要是播放状态就旋转
 const shouldRotate = computed(() => {
   return props.isPlaying;
 });

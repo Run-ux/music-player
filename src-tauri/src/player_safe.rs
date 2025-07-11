@@ -1,8 +1,8 @@
 use crate::player_fixed::{PlayMode, PlayerCommand, PlayerEvent, PlayerState, SongInfo, MediaType};
-use rand::Rng; // Added for shuffle mode
+use rand::Rng;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-use rodio::Source; // 添加Source trait的导入
+use rodio::Source;
 
 /// 线程安全的播放器适配器
 /// 将处理分为两部分：前端可以访问的线程安全状态和后台播放器线程
@@ -299,7 +299,7 @@ fn run_player_thread(
                                 continue;
                             }
 
-                            // 关键修复：切歌时无论什么模式都要先停止音频
+                            //切歌时无论什么模式都要先停止音频
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
                                 println!("切歌操作：停止所有音频播放");
@@ -364,7 +364,7 @@ fn run_player_thread(
                             current_position = 0;
                             paused_position = 0;
                             
-                            // 统一处理：无论视频还是音频，都直接设置为播放状态
+                            // 无论视频还是音频，都直接设置为播放状态
                             player_state_guard.state = PlayerState::Playing;
                             
 
@@ -441,7 +441,7 @@ fn run_player_thread(
                             current_position = 0;
                             paused_position = 0;
                             
-                            // 统一处理：直接设置为播放状态（用户点击歌曲通常期望立即播放）
+                            // 统一处理：直接设置为播放状态
                             player_state_guard.state = PlayerState::Playing;
                             
 
@@ -584,7 +584,7 @@ fn run_player_thread(
                         PlayerCommand::SeekTo(position_secs) => {
                             if let Some(current_idx) = player_state_guard.current_index {
                                 if let Some(song) = player_state_guard.playlist.get(current_idx) {
-                                    // 关键修复：检查当前播放模式和歌曲类型
+                                    //检查当前播放模式和歌曲类型
                                     let current_playback_mode = player_state_guard.current_playback_mode;
                                     let is_video_file = song.media_type == Some(crate::player_fixed::MediaType::Video);
                                     let is_mv_mode = current_playback_mode == crate::player_fixed::MediaType::Video && song.mv_path.is_some();
@@ -592,7 +592,7 @@ fn run_player_thread(
                                     // 如果是视频模式，完全不处理SeekTo命令
                                     if is_video_file || is_mv_mode {
                                         println!("视频模式下忽略SeekTo命令，由前端VideoPlayer处理");
-                                        // 不发送任何事件，避免干扰前端
+                                        // 不发送任何事件
                                         continue;
                                     }
                                     
@@ -725,7 +725,7 @@ fn run_player_thread(
                             println!("播放模式切换：{:?} -> {:?}", current_mode, new_mode);
                             
 
-                            // 关键修复：无论什么模式切换，都要先停止当前的音频播放
+                            // 无论什么模式切换，都要先停止当前的音频播放
                             if let Some(sink) = current_sink.take() {
                                 sink.stop();
                                 println!("播放模式切换：停止所有音频播放");

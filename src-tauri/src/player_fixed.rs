@@ -9,7 +9,6 @@ use image::{ImageFormat, Rgb, RgbImage};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use thiserror::Error;
-// 添加新的元数据库依赖
 use lofty::{AudioFile, Probe, TaggedFileExt, Accessor};
 use audiotags::Tag as AudioTag;
 
@@ -92,7 +91,7 @@ pub struct SongInfo {
 }
 
 impl SongInfo {
-    /// 从文件路径创建歌曲信息 - 使用四重兜底策略
+    /// 从文件路径创建歌曲信息
     pub fn from_path(path: &Path) -> Result<Self> {
         let _path_str = path.to_string_lossy().into_owned();
         println!("正在解析媒体文件: {}", path.display());
@@ -116,8 +115,7 @@ impl SongInfo {
             return Self::create_video_song_info(path);
         }
         
-        // 对于音频文件，继续使用原有逻辑
-        // 策略1: 使用 lofty 库（最强大的通用库）
+        // 使用lofty库
         if let Some(mut song_info) = Self::try_lofty_extraction(path) {
             println!("✅ 使用 lofty 库成功提取元数据");
             song_info.media_type = media_type;
@@ -129,7 +127,7 @@ impl SongInfo {
             return Ok(song_info);
         }
         
-        // 策略2: 使用 audiotags 库
+        // 使用audiotags库
         if let Some(mut song_info) = Self::try_audiotags_extraction(path) {
             println!("✅ 使用 audiotags 库成功提取元数据");
             song_info.media_type = media_type;
@@ -141,7 +139,7 @@ impl SongInfo {
             return Ok(song_info);
         }
         
-        // 策略3: 使用格式特定的方法（原有的 ID3/FLAC/OGG 方法）
+        // 使用格式特定的方法（原有的 ID3/FLAC/OGG 方法）
         if let Some(mut song_info) = Self::try_format_specific_extraction(path) {
             println!("✅ 使用格式特定方法成功提取元数据");
             song_info.media_type = media_type;
@@ -153,7 +151,7 @@ impl SongInfo {
             return Ok(song_info);
         }
         
-        // 策略4: 兜底方案，使用文件名作为标题
+        // 使用文件名作为标题
         println!("⚠️  所有元数据提取方法都失败，使用兜底方案");
         let mut song_info = Self::create_fallback_song_info(path);
         song_info.media_type = media_type;
@@ -255,9 +253,6 @@ impl SongInfo {
 
     /// 生成视频缩略图
     fn generate_video_thumbnail(_path: &Path) -> Option<String> {
-        // 这里可以使用ffmpeg来生成视频缩略图
-        // 目前先返回None，后续可以改进
-        // 可以生成一个默认的视频图标
         Self::generate_video_placeholder()
     }
 
@@ -487,7 +482,7 @@ impl SongInfo {
         None
     }
 
-    /// 策略1: 使用 lofty 库提取元数据和封面
+    //使用lofty库提取元数据和封面
     fn try_lofty_extraction(path: &Path) -> Option<SongInfo> {
         match Probe::open(path).and_then(|probe| probe.read()) {
             Ok(tagged_file) => {
@@ -531,7 +526,7 @@ impl SongInfo {
         }
     }
 
-    /// 策略2: 使用 audiotags 库提取元数据和封面  
+    //使用audiotags库提取元数据和封面  
     fn try_audiotags_extraction(path: &Path) -> Option<SongInfo> {
         match AudioTag::new().read_from_path(path) {
             Ok(tag) => {
@@ -592,7 +587,7 @@ impl SongInfo {
         }
     }
 
-    /// 策略3: 使用格式特定的方法（原有方法）
+    //使用格式特定的方法
     fn try_format_specific_extraction(path: &Path) -> Option<SongInfo> {
         match Tag::read_from_path(path) {
             Ok(tag) => {
@@ -626,7 +621,7 @@ impl SongInfo {
         }
     }
 
-    /// 策略4: 创建兜底歌曲信息
+    //创建兜底歌曲信息
     fn create_fallback_song_info(path: &Path) -> SongInfo {
         let path_str = path.to_string_lossy().into_owned();
         
@@ -797,7 +792,7 @@ impl SongInfo {
         estimated
     }
 
-    /// 尝试使用rodio解码器获取时长
+    //使用rodio解码器获取时长
     fn try_rodio_duration(path: &Path) -> Option<u64> {
         for attempt in 0..3 {
             if let Ok(file) = File::open(path) {
@@ -820,7 +815,7 @@ impl SongInfo {
         None
     }
 
-    /// 简化的时长获取方法
+    //简化的时长获取方法
     fn get_ogg_duration_advanced(path: &Path) -> Option<u64> {
         Self::estimate_duration_from_filesize(path, "ogg")
     }
@@ -846,7 +841,7 @@ impl SongInfo {
         Self::estimate_duration_from_filesize(path, "m4a")
     }
 
-    /// 基于文件大小估算时长
+    //基于文件大小估算时长
     fn estimate_duration_from_filesize(path: &Path, ext: &str) -> Option<u64> {
         let metadata = std::fs::metadata(path).ok()?;
         let file_size_bytes = metadata.len() as f64;
@@ -872,7 +867,7 @@ impl SongInfo {
     }
 }
 
-/// 播放器事件
+//播放器事件
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "data")]
 pub enum PlayerEvent {
@@ -900,7 +895,6 @@ pub enum PlayerCommand {
     SetVolume(f32),
     SeekTo(u64),
     UpdateVideoProgress { position: u64, duration: u64 },
-    // 新增：切换播放模式命令
     TogglePlaybackMode, // 在音频模式和MV模式之间切换
     SetPlaybackMode(MediaType), // 直接设置播放模式（音频或视频）
 }

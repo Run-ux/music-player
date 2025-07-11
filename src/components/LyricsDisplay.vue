@@ -24,7 +24,6 @@ const currentLyric = computed(() => {
 
   console.log(`计算歌词高亮: 当前时间 ${props.currentTime}秒 + 偏移 ${LYRIC_OFFSET_MS}ms = ${currentTimeMs}ms`);
 
-  // 优化的歌词匹配逻辑
   for (let i = 0; i < props.lyrics.length; i++) {
     const currentLyricTime = props.lyrics[i].time;
     const nextLyricTime = i < props.lyrics.length - 1 ? props.lyrics[i + 1].time : Infinity;
@@ -39,7 +38,7 @@ const currentLyric = computed(() => {
     }
   }
 
-  // 如果没有找到匹配的歌词行，使用原来的逻辑作为兜底
+  // 如果没有找到匹配的歌词行
   if (index === -1) {
     console.log('使用兜底逻辑');
     for (let i = 0; i < props.lyrics.length; i++) {
@@ -55,7 +54,7 @@ const currentLyric = computed(() => {
   return index >= 0 ? props.lyrics[index] : null;
 });
 
-// 添加调试信息 - 现在放在computed之后
+// 添加调试信息
 watch(() => props.lyrics, (newLyrics) => {
   console.log('歌词数据更新:', newLyrics);
   if (newLyrics && newLyrics.length > 0) {

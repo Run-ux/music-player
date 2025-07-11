@@ -7,7 +7,7 @@ export interface LyricLine {
   text: string;    // 歌词文本
 }
 
-// 新增：媒体类型枚举
+// 媒体类型枚举
 export enum MediaType {
   Audio = 'Audio',
   Video = 'Video'
@@ -21,7 +21,7 @@ export interface SongInfo {
   albumCover?: string;
   duration?: number;
   lyrics?: LyricLine[];  // 歌词信息
-  // 新增：MV相关字段
+  // MV相关字段
   mediaType?: MediaType;  // 媒体类型
   mvPath?: string;        // MV视频文件路径
   videoThumbnail?: string; // 视频缩略图
@@ -48,9 +48,9 @@ export const usePlayerStore = defineStore('player', () => {
   const playMode = ref<PlayMode>(PlayMode.Sequential);
   const position = ref<number>(0);
   const duration = ref<number>(0);
-  const currentPlaybackMode = ref<MediaType>(MediaType.Audio); // 新增：当前播放模式
+  const currentPlaybackMode = ref<MediaType>(MediaType.Audio); // 当前播放模式
   
-  // 新增：智能播放状态检测
+  // 智能播放状态检测
   const isActuallyPlaying = ref(false); // 真实播放状态
   const lastPositionUpdate = ref(0); // 最后一次进度更新时间
   const isTransitioning = ref(false); // 是否正在跳转
@@ -115,14 +115,14 @@ export const usePlayerStore = defineStore('player', () => {
   const next = async () => {
     console.log('切换到下一首歌曲');
     await invoke('next');
-    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+    // 确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
     state.value = PlayerState.Playing;
   };
   
   const previous = async () => {
     console.log('切换到上一首歌曲');
     await invoke('previous');
-    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+    // 确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
     state.value = PlayerState.Playing;
   };
   
@@ -131,7 +131,7 @@ export const usePlayerStore = defineStore('player', () => {
       console.log('用户选择歌曲:', index);
       await invoke('set_song', { index });
       currentIndex.value = index;
-      // 重要：确保前端状态也更新为播放状态，因为后端在设置歌曲时会自动开始播放
+      // 确保前端状态也更新为播放状态，因为后端在设置歌曲时会自动开始播放
       state.value = PlayerState.Playing;
     }
   };
@@ -166,7 +166,7 @@ export const usePlayerStore = defineStore('player', () => {
     console.log('视频跳转请求:', position, '秒');
   };
 
-  // 完全重写seekTo方法，彻底分离音频和视频跳转逻辑
+  // seekTo方法，彻底分离音频和视频跳转逻辑
   const seekTo = async (targetPosition: number) => {
     try {
       const current = currentSong.value;
@@ -182,7 +182,7 @@ export const usePlayerStore = defineStore('player', () => {
         mediaType: current.mediaType
       });
 
-      // 关键修复：明确判断是否需要视频处理
+      // 明确判断是否需要视频处理
       const isVideoMode = (
         currentPlaybackMode.value === MediaType.Video && current.mvPath ||
         current.mediaType === MediaType.Video
@@ -259,7 +259,7 @@ export const usePlayerStore = defineStore('player', () => {
     lastPosition.value = pos;
   };
 
-  // 优化：设置跳转状态
+  // 设置跳转状态
   const setTransitioning = (transitioning: boolean) => {
     isTransitioning.value = transitioning;
     if (transitioning) {
@@ -370,9 +370,8 @@ export const usePlayerStore = defineStore('player', () => {
     playMode,
     position,
     duration,
-    currentPlaybackMode, // 新增
+    currentPlaybackMode, 
     
-    // 新增状态
     isReallyPlaying, // 智能播放状态
     isTransitioning, // 跳转状态
     isNewSong, // 新歌曲状态
@@ -381,7 +380,7 @@ export const usePlayerStore = defineStore('player', () => {
     isPlaying,
     progress,
     currentSong,
-    currentSongHasMv, // 新增
+    currentSongHasMv,
     
     // 方法
     play,
@@ -400,11 +399,11 @@ export const usePlayerStore = defineStore('player', () => {
     updateCurrentSong,
     updateState,
     updatePlayMode,
-    setTransitioning, // 新增方法
+    setTransitioning, 
     updateVideoDuration, // 更新视频时长
     getVideoDuration,     // 获取视频时长
-    togglePlaybackMode, // 新增：切换播放模式
-    setPlaybackMode,    // 新增：设置播放模式
-    initializePlaybackMode, // 新增：初始化播放模式
+    togglePlaybackMode, // 切换播放模式
+    setPlaybackMode,    // 设置播放模式
+    initializePlaybackMode, // 初始化播放模式
   };
 });
