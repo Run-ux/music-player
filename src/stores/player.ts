@@ -77,16 +77,6 @@ export const usePlayerStore = defineStore('player', () => {
   const isAudioPlayerActive = ref(false); // 音频播放器是否激活
   const mutexLock = ref(false); // 互斥锁，防止同时播放
   
-  // 新增：强制互斥检查方法
-  const ensureMutualExclusion = () => {
-    if (isVideoPlayerActive.value && isAudioPlayerActive.value) {
-      console.warn('⚠️ 检测到音视频同时激活，强制停止音频播放');
-      deactivateAudioPlayer();
-      // 强制停止后端音频
-      invoke('pause').catch(console.error);
-    }
-  };
-  
   // 新增：全局播放状态检查
   const checkPlaybackState = () => {
     const hasActivePlayer = isVideoPlayerActive.value || isAudioPlayerActive.value;
@@ -242,81 +232,69 @@ export const usePlayerStore = defineStore('player', () => {
       return;
     }
     
-    // 检查当前播放模式，决定激活哪个播放器
-    const current = currentSong.value;
-    const isVideoMode = current?.mediaType === MediaType.Video || 
-                        (currentPlaybackMode.value === MediaType.Video && current?.mvPath);
-    
-    console.log('🎯 播放模式判断:', {
-      isVideoMode,
-      mediaType: current?.mediaType,
-      playbackMode: currentPlaybackMode.value,
-      hasMv: !!current?.mvPath
-    });
-    
-    // 关键修复：只有在模式切换时才强制停止所有播放器
-    const needsModeSwitch = (isVideoMode && isAudioPlayerActive.value) || 
-                         (!isVideoMode && isVideoPlayerActive.value);
-  
-    if (needsModeSwitch) {
-      console.log('🔄 检测到播放模式切换，停止当前播放器');
-      await stopAllPlayers();
-      // 等待停止完成
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    
-    if (isVideoMode) {
-      // 视频模式：激活视频播放器
-      console.log('🎬 激活视频播放器');
-      if (!activateVideoPlayer()) {
-        console.error('视频播放器激活失败');
-        return;
-      }
-    } else {
-      // 音频模式：激活音频播放器并调用后端
-      console.log('🎵 激活音频播放器');
-      if (!activateAudioPlayer()) {
-        console.error('音频播放器激活失败');
-        return;
-      }
+    try {
+      // 检查当前播放模式，决定激活哪个播放器
+      const current = currentSong.value;
+      const isVideoMode = current?.mediaType === MediaType.Video || 
+                         (currentPlaybackMode.value === MediaType.Video && current?.mvPath);
       
-      try {
+      console.log('🎯 播放模式判断:', {
+        isVideoMode,
+        mediaType: current?.mediaType,
+        playbackMode: currentPlaybackMode.value,
+        hasMv: !!current?.mvPath
+      });
+      
+      if (isVideoMode) {
+        // 视频模式：激活视频播放器
+        console.log('🎬 激活视频播放器');
+        if (!activateVideoPlayer()) {
+          console.error('视频播放器激活失败');
+          return;
+        }
+      } else {
+        // 音频模式：激活音频播放器并调用后端
+        console.log('🎵 激活音频播放器');
+        if (!activateAudioPlayer()) {
+          console.error('音频播放器激活失败');
+          return;
+        }
+        
+        // 调用后端播放
         await invoke('play');
         console.log('✅ 后端音频播放命令发送成功');
-      } catch (error) {
-        console.error('后端音频播放失败:', error);
-        deactivateAudioPlayer();
-        return;
       }
+      
+      // 立即设置播放状态
+      state.value = PlayerState.Playing;
+      console.log('✅ 播放流程完成');
+    } catch (error) {
+      console.error('播放失败:', error);
+      // 失败时清理状态
+      deactivateVideoPlayer();
+      deactivateAudioPlayer();
+      state.value = PlayerState.Paused;
     }
-    
-    // 关键修复：立即设置播放状态，确保UI响应迅速
-    state.value = PlayerState.Playing;
-    console.log('✅ 播放流程完成，状态已设置为播放');
   };
   
   const pause = async () => {
     console.log('⏸️ 开始暂停流程');
     
-    // 关键修复：根据当前激活的播放器进行针对性暂停
-    if (isVideoPlayerActive.value) {
-      console.log('⏸️ 停用视频播放器');
+    try {
+      // 简化暂停逻辑：直接调用后端暂停，不管当前是什么模式
+      await invoke('pause');
+      
+      // 立即设置暂停状态
+      state.value = PlayerState.Paused;
+      
+      // 停用所有播放器
       deactivateVideoPlayer();
-    }
-    
-    if (isAudioPlayerActive.value) {
-      console.log('⏸️ 停用音频播放器');
       deactivateAudioPlayer();
-      try {
-        await invoke('pause');
-      } catch (error) {
-        console.error('停止音频播放失败:', error);
-      }
+      
+      console.log('✅ 暂停流程完成');
+    } catch (error) {
+      console.error('暂停失败:', error);
     }
-    
-    // 关键修复：立即设置暂停状态，确保UI响应迅速
-    state.value = PlayerState.Paused;
-    console.log('✅ 暂停流程完成，状态已设置为暂停');
   };
   
   const next = async () => {

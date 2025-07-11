@@ -62,7 +62,7 @@ const videoModeInfo = computed(() => getModeInfo(MediaType.Video));
 </script>
 
 <template>
-  <div class="playback-mode-control" v-if="currentSongSupportsModeSwitch">
+  <div class="playback-mode-control" v-if="currentSongSupportsModeSwitch" style="display: none;">
     <div class="mode-buttons">
       <button
         class="mode-btn"

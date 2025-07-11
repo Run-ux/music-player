@@ -34,10 +34,20 @@ const handleAddSongs = async () => {
   await invoke('open_audio_files');
 };
 
-// 清空播放列表
+// 清空播放列表 - 修改为确认后再清空
 const handleClearPlaylist = async () => {
-  if (confirm('确定要清空播放列表吗？')) {
-    await invoke('clear_playlist');
+  // 使用原生确认对话框
+  const confirmed = confirm('确定要清空播放列表吗？');
+  
+  if (confirmed) {
+    try {
+      await invoke('clear_playlist');
+      console.log('播放列表已清空');
+    } catch (error) {
+      console.error('清空播放列表失败:', error);
+    }
+  } else {
+    console.log('用户取消清空播放列表');
   }
 };
 
