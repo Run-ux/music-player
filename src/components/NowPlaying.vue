@@ -37,9 +37,17 @@ const songAlbum = computed(() => {
   return props.song?.album || '未知专辑';
 });
 
-// 检查当前歌曲是否有MV
-const hasMv = computed(() => {
-  return props.song?.mvPath !== undefined && props.song?.mvPath !== null;
+// 播放模式切换相关逻辑
+const supportsModeSwitch = computed(() => {
+  if (!props.song) return false;
+  
+  // 纯视频文件不支持切换到音频模式
+  if (props.song.mediaType === MediaType.Video) {
+    return false;
+  }
+  
+  // 音频文件只有在有MV时才支持切换
+  return props.song.mediaType === MediaType.Audio && props.song.mvPath;
 });
 
 // 当前播放模式
@@ -49,21 +57,40 @@ const isVideoMode = computed(() => {
 
 // 切换播放模式
 const togglePlaybackMode = async () => {
-  if (!hasMv.value) {
-    console.warn('当前歌曲没有MV，无法切换模式');
+  if (!supportsModeSwitch.value) {
+    console.warn('当前歌曲不支持播放模式切换');
     return;
   }
   
   try {
+    const oldMode = isVideoMode.value ? MediaType.Video : MediaType.Audio;
     const newMode = isVideoMode.value ? MediaType.Audio : MediaType.Video;
-    console.log('切换播放模式:', isVideoMode.value ? 'MV -> 音频' : '音频 -> MV');
+    console.log('🔄 NowPlaying切换播放模式:', oldMode, '->', newMode);
     
     // 调用后端切换播放模式
     await playerStore.setPlaybackMode(newMode);
     
-    console.log('播放模式切换成功:', newMode);
+    // 关键修复：视频切音频后给一个短暂延迟确保后端处理完成
+    if (oldMode === MediaType.Video && newMode === MediaType.Audio) {
+      console.log('视频切音频，等待后端完成处理...');
+      
+      // 等待一小段时间确保后端音频播放器准备就绪
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // 检查播放状态，如果不是播放状态则强制播放
+      if (!playerStore.isPlaying) {
+        console.log('检测到音频未自动播放，手动启动播放');
+        try {
+          await playerStore.play();
+        } catch (error) {
+          console.warn('手动启动音频播放失败:', error);
+        }
+      }
+    }
+    
+    console.log('✅ 播放模式切换成功:', newMode);
   } catch (error) {
-    console.error('切换播放模式失败:', error);
+    console.error('❌ 切换播放模式失败:', error);
   }
 };
 
@@ -124,24 +151,6 @@ onUnmounted(() => {
           @error="($event.target as HTMLImageElement).src = '/src/assets/default-cover.jpg'"
         />
       </div>
-      
-      <!-- MV切换按钮 -->
-      <div v-if="hasMv" class="mv-toggle-container">
-        <button 
-          @click="togglePlaybackMode"
-          class="mv-toggle-btn"
-          :class="{ 'video-mode': isVideoMode }"
-          :title="isVideoMode ? '切换到音频模式' : '切换到MV模式'"
-        >
-          <svg v-if="!isVideoMode" class="icon" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-          <svg v-else class="icon" viewBox="0 0 24 24">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
-          </svg>
-          <span class="mode-text">{{ isVideoMode ? 'MV' : '音频' }}</span>
-        </button>
-      </div>
     </div>
     
     <div class="song-details">
@@ -149,11 +158,31 @@ onUnmounted(() => {
       <div class="song-artist">{{ songArtist }}</div>
       <div class="song-album">{{ songAlbum }}</div>
       
-      <!-- 显示播放模式提示 -->
-      <div v-if="hasMv" class="playback-mode-indicator">
-        <span class="mode-indicator" :class="{ 'video-mode': isVideoMode }">
-          {{ isVideoMode ? '🎬 MV模式' : '🎵 音频模式' }}
-        </span>
+      <!-- 播放模式切换按钮 - 横向排列在歌曲信息下方 -->
+      <div v-if="supportsModeSwitch" class="mode-switch-controls">
+        <button 
+          @click="togglePlaybackMode"
+          class="mode-switch-btn"
+          :class="{ 'active': !isVideoMode }"
+          :title="'音频模式'"
+        >
+          <svg class="mode-icon" viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+          <span class="mode-text">音频</span>
+        </button>
+        
+        <button 
+          @click="togglePlaybackMode"
+          class="mode-switch-btn"
+          :class="{ 'active': isVideoMode }"
+          :title="'MV模式'"
+        >
+          <svg class="mode-icon" viewBox="0 0 24 24">
+            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+          </svg>
+          <span class="mode-text">MV</span>
+        </button>
       </div>
     </div>
   </div>
@@ -196,48 +225,6 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
-.mv-toggle-container {
-  position: absolute;
-  bottom: -10px;
-  right: -10px;
-}
-
-.mv-toggle-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: #fff;
-  border: 2px solid #ddd;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.mv-toggle-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.mv-toggle-btn.video-mode {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-color: #667eea;
-}
-
-.mv-toggle-btn .icon {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
-.mode-text {
-  font-weight: 600;
-}
-
 .song-details {
   text-align: center;
   width: 100%;
@@ -250,6 +237,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #333;
 }
 
 .song-artist {
@@ -267,26 +255,110 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 0.5rem;
+  margin-bottom: 1.25rem;
 }
 
-.playback-mode-indicator {
-  margin-top: 0.5rem;
+/* 播放模式切换按钮样式 - 横向排列 */
+.mode-switch-controls {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  width: 100%;
 }
 
-.mode-indicator {
-  display: inline-block;
-  padding: 4px 8px;
-  background: #f0f0f0;
+.mode-switch-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px solid rgba(0, 0, 0, 0.1);
   border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(5px);
+  min-width: 80px;
   color: #666;
+}
+
+.mode-switch-btn:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.mode-switch-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: white;
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+}
+
+.mode-switch-btn.active:hover {
+  transform: translateY(-2px);
+  background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.mode-icon {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
   transition: all 0.3s ease;
 }
 
-.mode-indicator.video-mode {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+.mode-switch-btn:hover .mode-icon {
+  transform: scale(1.1);
+}
+
+.mode-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+  .song-title {
+    font-size: 1.3rem;
+  }
+  
+  .mode-switch-controls {
+    gap: 0.5rem;
+  }
+  
+  .mode-switch-btn {
+    padding: 0.625rem 0.75rem;
+    min-width: 70px;
+  }
+  
+  .mode-icon {
+    width: 20px;
+    height: 20px;
+  }
+  
+  .mode-text {
+    font-size: 0.8rem;
+  }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+  .mode-switch-btn {
+    padding: 0.875rem 1rem;
+  }
+  
+  .mode-switch-btn:hover {
+    transform: none;
+  }
+  
+  .mode-switch-btn:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
 }
 </style>

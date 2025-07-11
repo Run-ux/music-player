@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import PlayModeControl from './PlayModeControl.vue';
-import { usePlayerStore, SongInfo } from '../stores/player';
+import { usePlayerStore, SongInfo, MediaType } from '../stores/player';
 
 const props = defineProps<{
   currentSong: SongInfo | null;
@@ -186,11 +186,38 @@ onMounted(async () => {
 
 // 新增：直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
 watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDuration]) => {
-  // 只有在不是用户拖拽且不是用户跳转时才更新进度条
-  if (!isDragging.value && !isUserJumping.value) {
-    position.value = newPosition;
-    duration.value = newDuration;
-    progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+  // 关键修复：增加更智能的保护逻辑
+  const shouldUpdateProgress = !isDragging.value && !isUserJumping.value;
+  
+  if (shouldUpdateProgress) {
+    // 检查是否是视频模式下的自然进度更新
+    const isVideoMode = props.currentSong?.mediaType === 'Video' || 
+                       (playerStore.currentPlaybackMode === 'Video' && props.currentSong?.mvPath);
+    
+    if (isVideoMode) {
+      // 视频模式：更温和地更新进度条，避免突兀变化
+      const oldPosition = position.value;
+      const positionDiff = Math.abs(newPosition - oldPosition);
+      
+      // 如果位置变化很大（可能是跳转），立即更新
+      // 如果是小幅变化（正常播放），平滑更新
+      if (positionDiff > 2) {
+        console.log('PlayerControls: 检测到视频跳转，立即更新进度条:', newPosition);
+        position.value = newPosition;
+        duration.value = newDuration;
+        progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+      } else {
+        // 平滑更新，避免进度条抖动
+        position.value = newPosition;
+        duration.value = newDuration;
+        progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+      }
+    } else {
+      // 音频模式：正常更新
+      position.value = newPosition;
+      duration.value = newDuration;
+      progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+    }
   }
 }, { immediate: true });
 
@@ -203,6 +230,63 @@ watch(() => props.currentSong, (newSong, oldSong) => {
     console.log('Props歌曲变化，进度条重置:', newSong.title);
   }
 }, { deep: true });
+
+// 播放模式相关状态和计算属性
+const supportsModeSwitch = computed(() => {
+  if (!props.currentSong) return false;
+  
+  // 纯视频文件不支持切换到音频模式
+  if (props.currentSong.mediaType === MediaType.Video) {
+    return false;
+  }
+  
+  // 音频文件只有在有MV时才支持切换
+  return props.currentSong.mediaType === MediaType.Audio && props.currentSong.mvPath;
+});
+
+// 当前播放模式
+const isVideoMode = computed(() => {
+  return playerStore.currentPlaybackMode === MediaType.Video;
+});
+
+// 切换播放模式
+const handleTogglePlaybackMode = async () => {
+  if (!supportsModeSwitch.value) {
+    console.warn('当前歌曲不支持播放模式切换');
+    return;
+  }
+  
+  try {
+    const oldMode = isVideoMode.value ? MediaType.Video : MediaType.Audio;
+    const newMode = isVideoMode.value ? MediaType.Audio : MediaType.Video;
+    console.log('🔄 PlayerControls切换播放模式:', oldMode, '->', newMode);
+    
+    // 调用后端切换播放模式
+    await playerStore.setPlaybackMode(newMode);
+    
+    // 关键修复：视频切音频后给一个短暂延迟确保后端处理完成
+    if (oldMode === MediaType.Video && newMode === MediaType.Audio) {
+      console.log('视频切音频，等待后端完成处理...');
+      
+      // 等待一小段时间确保后端音频播放器准备就绪
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // 检查播放状态，如果不是播放状态则强制播放
+      if (!props.isPlaying) {
+        console.log('检测到音频未自动播放，手动启动播放');
+        try {
+          await playerStore.play();
+        } catch (error) {
+          console.warn('手动启动音频播放失败:', error);
+        }
+      }
+    }
+    
+    console.log('✅ 播放模式切换成功:', newMode);
+  } catch (error) {
+    console.error('❌ 切换播放模式失败:', error);
+  }
+};
 </script>
 
 <template>
@@ -228,7 +312,7 @@ watch(() => props.currentSong, (newSong, oldSong) => {
       <button @click="handlePrevious" class="control-btn">
         <i class="icon-previous">⏮</i>
       </button>
-      <button @click="handlePlayPause" class="control-btn" :class="{ 'play': !isPlaying, 'pause': isPlaying }">
+      <button @click="handlePlayPause" class="control-btn play-pause-btn" :class="{ 'play': !isPlaying, 'pause': isPlaying }">
         <i v-if="!isPlaying" class="icon-play">▶</i>
         <i v-else class="icon-pause">⏸</i>
       </button>
@@ -237,7 +321,7 @@ watch(() => props.currentSong, (newSong, oldSong) => {
       </button>
     </div>
     
-    <!-- 添加播放模式控制 -->
+    <!-- 保留原有的播放模式控制 -->
     <div class="play-mode-section">
       <PlayModeControl />
     </div>

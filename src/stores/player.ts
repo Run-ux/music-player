@@ -19,13 +19,15 @@ export interface SongInfo {
   artist?: string;
   album?: string;
   albumCover?: string;
-  duration?: number;
-  lyrics?: LyricLine[];  // 歌词信息
-  // 新增：MV相关字段
-  mediaType?: MediaType;  // 媒体类型
-  mvPath?: string;        // MV视频文件路径
-  videoThumbnail?: string; // 视频缩略图
-  hasLyrics?: boolean;    // 是否有歌词
+  duration?: number; // 秒
+  lyrics?: LyricLine[];
+  mediaType?: MediaType;
+  mvPath?: string;
+  videoThumbnail?: string;
+  hasLyrics?: boolean;
+  // 新增：支持播放模式切换判断
+  supportsModeSwitch?: boolean;
+  isPureVideo?: boolean;
 }
 
 export enum PlayerState {
@@ -179,31 +181,36 @@ export const usePlayerStore = defineStore('player', () => {
         position: targetPosition,
         song: current.title,
         playbackMode: currentPlaybackMode.value,
-        mediaType: current.mediaType
+        mediaType: current.mediaType,
+        mvPath: current.mvPath
       });
 
-      // 关键修复：明确判断是否需要视频处理
-      const isVideoMode = (
-        currentPlaybackMode.value === MediaType.Video && current.mvPath ||
-        current.mediaType === MediaType.Video
-      );
+      // 关键修复：更精确的视频模式判断逻辑
+      const isVideoFile = current.mediaType === MediaType.Video;
+      const isMvMode = currentPlaybackMode.value === MediaType.Video && current.mvPath;
+      const isVideoMode = isVideoFile || isMvMode;
 
       if (isVideoMode) {
         // 视频模式：完全不调用后端，只更新前端状态
-        console.log('视频模式跳转 - 只更新前端状态');
+        console.log('🎬 视频模式跳转 - 纯前端处理，不触发后端SeekTo');
+        
+        // 立即更新前端进度，给用户即时反馈
         position.value = targetPosition;
-        // 不调用任何后端API，让VideoPlayer组件处理
+        
+        // 关键：不调用任何后端API，完全由VideoPlayer组件处理视频跳转
+        // 这避免了后端音频播放器被触发的问题
         return;
       } else {
-        // 音频模式：调用后端跳转
-        console.log('音频模式跳转 - 调用后端API');
+        // 音频模式：正常调用后端跳转
+        console.log('🎵 音频模式跳转 - 调用后端API');
         setTransitioning(true);
         
         // 立即更新前端进度，给用户即时反馈
         position.value = targetPosition;
         
+        // 只有音频模式才调用后端跳转
         await invoke('seek_to', { position: targetPosition });
-        console.log('后端跳转完成');
+        console.log('后端音频跳转完成');
         
         // 延迟重置状态
         setTimeout(() => {
@@ -340,10 +347,47 @@ export const usePlayerStore = defineStore('player', () => {
     console.log('播放模式已切换为:', newMode);
   };
 
+  // 简化的播放模式切换方法
   const setPlaybackMode = async (mode: MediaType) => {
-    await invoke('set_playback_mode', { mode });
-    currentPlaybackMode.value = mode;
-    console.log('播放模式已设置为:', mode);
+    console.log('前端设置播放模式:', mode);
+    
+    // 记录切换前的状态
+    const wasPlaying = isPlaying.value;
+    const oldMode = currentPlaybackMode.value;
+    
+    try {
+      // 调用后端设置播放模式
+      await invoke('set_playback_mode', { mode });
+      
+      // 立即更新本地状态
+      currentPlaybackMode.value = mode;
+      console.log('播放模式已设置为:', mode);
+      
+      // 关键修复：视频切音频时确保播放状态
+      if (oldMode === MediaType.Video && mode === MediaType.Audio) {
+        console.log('视频切音频模式，确保播放状态流畅');
+        
+        // 等待一小段时间让后端处理完成
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // 强制设置为播放状态
+        state.value = PlayerState.Playing;
+        
+        // 如果之前在播放或者是视频切音频，确保音频开始播放
+        if (wasPlaying || oldMode === MediaType.Video) {
+          try {
+            await invoke('play');
+            console.log('视频切音频后音频自动开始播放');
+          } catch (error) {
+            console.warn('视频切音频后启动播放失败:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('设置播放模式失败:', error);
+      // 回滚本地状态
+      currentPlaybackMode.value = oldMode;
+    }
   };
 
   // 初始化时获取当前播放模式

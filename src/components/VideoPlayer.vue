@@ -198,7 +198,7 @@ const sendProgressToBackend = async (position: number, duration: number) => {
   }
 };
 
-// 处理视频时间更新 - 同步到主播放器进度
+// 处理视频时间更新 - 只更新前端，不触发后端
 const handleTimeUpdate = () => {
   if (videoElement.value && isVideoLoaded.value) {
     const currentTime = Math.floor(videoElement.value.currentTime);
@@ -209,12 +209,12 @@ const handleTimeUpdate = () => {
       actualVideoDuration.value = videoDuration;
     }
     
-    // 只要视频在播放，就持续更新进度到主进度条
+    // 关键修复：视频播放时只更新前端进度，绝不发送到后端
     if (!videoElement.value.paused && isVideoPlaying.value && !isUserSeeking.value) {
-      // 关键修复：确保主进度条实时更新
+      // 只更新前端进度显示，完全不调用后端API
       playerStore.updateProgress(currentTime, videoDuration);
-      // 同时发送到后端，确保后端状态同步
-      sendProgressToBackend(currentTime, videoDuration);
+      // 移除：不再发送到后端，避免触发音频重置
+      // sendProgressToBackend(currentTime, videoDuration);
     }
   }
 };
@@ -266,15 +266,28 @@ const handleVideoSeek = () => {
     
     console.log('VideoPlayer: 视频内置进度条跳转，同步到主进度条:', currentTime);
     
-    // 设置标志避免循环触发
+    // 关键修复：设置更长的保护标志，避免和主进度条冲突
     isUserSeeking.value = true;
     
-    // 只更新前端状态，不发送到后端
-    playerStore.updateProgress(currentTime, duration);
-    
+    // 延迟一小段时间再更新，确保视频跳转完全完成
     setTimeout(() => {
-      isUserSeeking.value = false;
+      // 双重检查：确保视频确实跳转到了目标位置
+      if (videoElement.value && Math.abs(videoElement.value.currentTime - currentTime) < 1) {
+        // 只更新前端状态，不发送到后端，避免触发音频播放
+        playerStore.updateProgress(currentTime, duration);
+        console.log('VideoPlayer: 进度同步完成:', currentTime, '秒');
+      } else {
+        console.log('VideoPlayer: 跳转尚未完成，跳过进度同步');
+      }
+      
+      // 延长保护时间，确保主进度条不会立即响应
+      setTimeout(() => {
+        isUserSeeking.value = false;
+        console.log('VideoPlayer: 跳转保护解除');
+      }, 300);
     }, 100);
+  } else {
+    console.log('VideoPlayer: 跳过进度条同步 - 可能是主进度条触发的跳转');
   }
 };
 
@@ -313,11 +326,12 @@ const handleVideoLoadedMetadata = () => {
     // 更新实际视频时长
     actualVideoDuration.value = videoDuration;
     
-    // 立即同步正确的时长到播放器系统，确保进度条使用正确的时长
+    // 关键修复：只更新前端进度和时长缓存，不发送到后端
     if (videoDuration > 0) {
-      console.log('立即同步视频时长到播放器系统:', videoDuration, '秒');
+      console.log('立即同步视频时长到前端显示:', videoDuration, '秒');
       playerStore.updateProgress(0, videoDuration);
-      sendProgressToBackend(0, videoDuration);
+      // 移除：不再发送到后端，避免触发音频重置
+      // sendProgressToBackend(0, videoDuration);
       
       // 新增：更新PlayerStore中的视频时长缓存，让播放列表能显示正确时长
       playerStore.updateVideoDuration(props.song.path, videoDuration);

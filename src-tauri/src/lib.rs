@@ -407,6 +407,7 @@ pub fn run() {
             toggle_playback_mode,
             set_playback_mode,
             get_current_playback_mode, // 添加获取当前播放模式的命令
+            check_song_mode_support, // 添加检查歌曲播放模式支持的命令
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -466,8 +467,26 @@ async fn set_playback_mode(mode: crate::player_fixed::MediaType, _state: tauri::
 #[tauri::command]
 async fn get_current_playback_mode(_state: tauri::State<'_, AppState>) -> Result<crate::player_fixed::MediaType, String> {
     let player_instance = get_player_instance().await?;
-    let _player_state_guard = player_instance.lock().await;
-    // 这里需要从播放器状态中获取当前播放模式
-    // 目前先返回默认的Audio模式，稍后会修复
-    Ok(crate::player_fixed::MediaType::Audio)
+    let player_state_guard = player_instance.lock().await;
+    
+    // 从播放器状态中获取真实的播放模式
+    let state_snapshot = player_state_guard.player.get_player_state_snapshot().await;
+    Ok(state_snapshot.current_playback_mode)
+}
+
+/// 检查歌曲是否支持播放模式切换
+#[tauri::command]
+async fn check_song_mode_support(song_path: String, _state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    
+    // 获取当前播放列表
+    let playlist = player_state_guard.player.get_playlist();
+    
+    // 查找指定路径的歌曲
+    if let Some(song) = playlist.iter().find(|s| s.path == song_path) {
+        Ok(song.supports_mode_switching())
+    } else {
+        Err("歌曲未找到".to_string())
+    }
 }
