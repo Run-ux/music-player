@@ -406,8 +406,14 @@ pub fn run() {
             update_video_progress,
             toggle_playback_mode,
             set_playback_mode,
-            get_current_playback_mode, // 添加获取当前播放模式的命令
-            check_song_mode_support, // 添加检查歌曲播放模式支持的命令
+            get_current_playback_mode,
+            check_song_mode_support,
+            // 新增：音视频互斥控制命令
+            force_stop_audio,
+            force_stop_video,
+            force_stop_all,
+            activate_audio_player,
+            activate_video_player,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -439,7 +445,67 @@ async fn update_video_progress(position: u64, duration: u64, _state: tauri::Stat
     Ok(())
 }
 
-/// 切换播放模式（音频/MV）
+/// 强制停止音频播放
+#[tauri::command]
+async fn force_stop_audio(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ForceStopAudio)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 强制停止视频播放
+#[tauri::command]
+async fn force_stop_video(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ForceStopVideo)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 强制停止所有播放
+#[tauri::command]
+async fn force_stop_all(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ForceStopAll)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 激活音频播放器（确保音视频互斥）
+#[tauri::command]
+async fn activate_audio_player(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ActivateAudioPlayer)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 激活视频播放器（确保音视频互斥）
+#[tauri::command]
+async fn activate_video_player(_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let player_instance = get_player_instance().await?;
+    let player_state_guard = player_instance.lock().await;
+    player_state_guard
+        .player
+        .send_command(PlayerCommand::ActivateVideoPlayer)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 切换播放模式（音频/视频）
 #[tauri::command]
 async fn toggle_playback_mode(_state: tauri::State<'_, AppState>) -> Result<(), String> {
     let player_instance = get_player_instance().await?;
@@ -451,7 +517,7 @@ async fn toggle_playback_mode(_state: tauri::State<'_, AppState>) -> Result<(), 
         .map_err(|e| e.to_string())
 }
 
-/// 设置播放模式（音频/MV）
+/// 设置播放模式
 #[tauri::command]
 async fn set_playback_mode(mode: crate::player_fixed::MediaType, _state: tauri::State<'_, AppState>) -> Result<(), String> {
     let player_instance = get_player_instance().await?;
@@ -468,25 +534,20 @@ async fn set_playback_mode(mode: crate::player_fixed::MediaType, _state: tauri::
 async fn get_current_playback_mode(_state: tauri::State<'_, AppState>) -> Result<crate::player_fixed::MediaType, String> {
     let player_instance = get_player_instance().await?;
     let player_state_guard = player_instance.lock().await;
-    
-    // 从播放器状态中获取真实的播放模式
-    let state_snapshot = player_state_guard.player.get_player_state_snapshot().await;
-    Ok(state_snapshot.current_playback_mode)
+    let snapshot = player_state_guard.player.get_player_state_snapshot().await;
+    Ok(snapshot.current_playback_mode)
 }
 
-/// 检查歌曲是否支持播放模式切换
+/// 检查歌曲是否支持模式切换
 #[tauri::command]
-async fn check_song_mode_support(song_path: String, _state: tauri::State<'_, AppState>) -> Result<bool, String> {
+async fn check_song_mode_support(song_index: usize, _state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let player_instance = get_player_instance().await?;
     let player_state_guard = player_instance.lock().await;
-    
-    // 获取当前播放列表
     let playlist = player_state_guard.player.get_playlist();
     
-    // 查找指定路径的歌曲
-    if let Some(song) = playlist.iter().find(|s| s.path == song_path) {
+    if let Some(song) = playlist.get(song_index) {
         Ok(song.supports_mode_switching())
     } else {
-        Err("歌曲未找到".to_string())
+        Err("歌曲索引无效".to_string())
     }
 }

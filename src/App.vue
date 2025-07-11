@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from "vue";
+import { onMounted, computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { usePlayerStore, PlayerState, SongInfo, MediaType } from "./stores/player";
@@ -190,60 +190,113 @@ onMounted(() => {
   link.as = 'image';
   document.head.appendChild(link);
 });
+
+
+const showSplash = ref(true);
+
+// 模拟加载过程
+setTimeout(() => {
+  showSplash.value = false;
+}, 5000);
 </script>
 
 <template>
   <div class="app">
-    <header class="app-header">
-      <h1>音乐播放器</h1>
-    </header>
-    
-    <main class="app-content">
-      <div class="left-panel">
-        <NowPlaying 
-          :song="playerStore.currentSong" 
-          :is-playing="playerStore.isPlaying" 
-        />
-        <PlayerControls 
-          :current-song="playerStore.currentSong"
-          :is-playing="playerStore.isPlaying"
-          @play="handlePlay"
-          @pause="handlePause"
-          @next="handleNext"
-          @previous="handlePrevious"
-        />
-      </div>
-      
-      <div class="center-panel">
-        <!-- 根据播放模式和媒体类型显示不同组件 -->
-        <VideoPlayer
-          v-if="shouldShowVideo"
-          :song="playerStore.currentSong"
-          :is-playing="playerStore.isPlaying"
-        />
-        <LyricsDisplay
-          v-else-if="shouldShowLyrics"
-          :lyrics="playerStore.currentSong?.lyrics"
-          :current-time="playerStore.position"
-          :is-playing="playerStore.isPlaying"
-          @seek="handleLyricsSeek"
-        />
-        <div v-else class="no-content-placeholder">
-          <div class="placeholder-icon">🎵</div>
-          <p>选择歌曲开始播放</p>
+    <!-- 启动动画屏幕 -->
+    <div v-if="showSplash" class="splash-screen">
+      <div class="splash-content">
+        <!-- Logo区域 -->
+        <div class="logo-container">
+          <div class="logo-icon">🎵</div>
+          <div class="logo-rings">
+            <div class="ring ring-1"></div>
+            <div class="ring ring-2"></div>
+            <div class="ring ring-3"></div>
+          </div>
+        </div>
+        
+        <!-- 项目标题 -->
+        <div class="project-title">
+          <div class="title-main">Rust大作业</div>
+          <div class="title-divider"></div>
+          <div class="title-sub">音乐播放器</div>
+        </div>
+        
+        <!-- 加载指示器 -->
+        <div class="loading-indicator">
+          <div class="loading-dots">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+          <div class="loading-text">正在启动...</div>
         </div>
       </div>
       
-      <div class="right-panel">
-        <Playlist 
-          :playlist="playerStore.playlist" 
-          :current-index="playerStore.currentIndex"
-          :is-playing="playerStore.isPlaying"
-          @select-song="handleSelectSong"
-          @remove-song="handleRemoveSong"
-        />
+      <!-- 背景装饰 -->
+      <div class="splash-bg-decoration">
+        <div class="floating-note note-1">♪</div>
+        <div class="floating-note note-2">♫</div>
+        <div class="floating-note note-3">♩</div>
+        <div class="floating-note note-4">♬</div>
+        <div class="floating-note note-5">♭</div>
+        <div class="floating-note note-6">♯</div>
       </div>
-    </main>
+    </div>
+
+    <!-- 主应用内容 -->
+    <div v-else class="main-app">
+      <header class="app-header animate-slide-down">
+        <h1>音乐播放器</h1>
+      </header>
+      
+      <main class="app-content">
+        <div class="left-panel animate-slide-right">
+          <NowPlaying 
+            :song="playerStore.currentSong" 
+            :is-playing="playerStore.isPlaying" 
+          />
+          <PlayerControls 
+            :current-song="playerStore.currentSong"
+            :is-playing="playerStore.isPlaying"
+            @play="handlePlay"
+            @pause="handlePause"
+            @next="handleNext"
+            @previous="handlePrevious"
+          />
+        </div>
+        
+        <div class="center-panel animate-fade-in">
+          <!-- 根据播放模式和媒体类型显示不同组件 -->
+          <VideoPlayer
+            v-if="shouldShowVideo"
+            :song="playerStore.currentSong"
+            :is-playing="playerStore.isPlaying"
+          />
+          <LyricsDisplay
+            v-else-if="shouldShowLyrics"
+            :lyrics="playerStore.currentSong?.lyrics"
+            :current-time="playerStore.position"
+            :is-playing="playerStore.isPlaying"
+            @seek="handleLyricsSeek"
+          />
+          <div v-else class="no-content-placeholder">
+            <div class="placeholder-icon">🎵</div>
+            <p>选择歌曲开始播放</p>
+          </div>
+        </div>
+        
+        <div class="right-panel animate-slide-left">
+          <Playlist 
+            :playlist="playerStore.playlist" 
+            :current-index="playerStore.currentIndex"
+            :is-playing="playerStore.isPlaying"
+            @select-song="handleSelectSong"
+            @remove-song="handleRemoveSong"
+          />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -387,56 +440,1904 @@ onMounted(() => {
   z-index: 1;
 }
 
-/* 响应式设计 */
-@media (max-width: 1200px) {
-  .app-content {
-    flex-direction: column;
-    overflow-y: auto;
-    gap: 0.75rem;
-    padding: 0.75rem;
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
   }
-  
-  .left-panel,
-  .center-panel,
-  .right-panel {
-    flex: none;
-    min-width: unset;
-    max-width: unset;
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
   }
-  
-  .left-panel {
-    flex-direction: row;
-    gap: 0.75rem;
-  }
-  
-  .center-panel {
-    min-height: 280px;
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
   }
 }
 
-@media (max-width: 900px) {
-  .left-panel {
-    flex-direction: column;
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-@media (max-width: 768px) {
-  .app-content {
-    padding: 0.5rem;
-    gap: 0.5rem;
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 背景装饰音符 */
+.splash-bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.floating-note {
+  position: absolute;
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.1);
+  animation: floatNote 8s ease-in-out infinite;
+}
+
+.note-1 {
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.note-2 {
+  top: 20%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.note-3 {
+  top: 60%;
+  left: 5%;
+  animation-delay: 2s;
+}
+
+.note-4 {
+  bottom: 20%;
+  right: 10%;
+  animation-delay: 3s;
+}
+
+.note-5 {
+  top: 40%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+.note-6 {
+  bottom: 40%;
+  left: 20%;
+  animation-delay: 5s;
+}
+
+@keyframes floatNote {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.1;
   }
-  
-  .app-header {
-    padding: 0.75rem 1rem;
+  50% {
+    transform: translateY(-20px) rotate(180deg);
+    opacity: 0.3;
   }
-  
-  .app-header h1 {
-    font-size: 1.4rem;
+}
+
+.main-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  position: relative;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.left-panel {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 300px;
+  height: 100%;
+}
+
+.center-panel {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+}
+
+.right-panel {
+  flex: 3;
+  min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 250px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 2px dashed rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.no-content-placeholder::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
   }
-  
-  .center-panel {
-    min-height: 240px;
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
   }
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+}
+
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 背景装饰音符 */
+.splash-bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.floating-note {
+  position: absolute;
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.1);
+  animation: floatNote 8s ease-in-out infinite;
+}
+
+.note-1 {
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.note-2 {
+  top: 20%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.note-3 {
+  top: 60%;
+  left: 5%;
+  animation-delay: 2s;
+}
+
+.note-4 {
+  bottom: 20%;
+  right: 10%;
+  animation-delay: 3s;
+}
+
+.note-5 {
+  top: 40%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+.note-6 {
+  bottom: 40%;
+  left: 20%;
+  animation-delay: 5s;
+}
+
+@keyframes floatNote {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.1;
+  }
+  50% {
+    transform: translateY(-20px) rotate(180deg);
+    opacity: 0.3;
+  }
+}
+
+.main-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  position: relative;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.left-panel {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 300px;
+  height: 100%;
+}
+
+.center-panel {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+}
+
+.right-panel {
+  flex: 3;
+  min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 250px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 2px dashed rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.no-content-placeholder::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+}
+
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 背景装饰音符 */
+.splash-bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.floating-note {
+  position: absolute;
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.1);
+  animation: floatNote 8s ease-in-out infinite;
+}
+
+.note-1 {
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.note-2 {
+  top: 20%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.note-3 {
+  top: 60%;
+  left: 5%;
+  animation-delay: 2s;
+}
+
+.note-4 {
+  bottom: 20%;
+  right: 10%;
+  animation-delay: 3s;
+}
+
+.note-5 {
+  top: 40%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+.note-6 {
+  bottom: 40%;
+  left: 20%;
+  animation-delay: 5s;
+}
+
+@keyframes floatNote {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.1;
+  }
+  50% {
+    transform: translateY(-20px) rotate(180deg);
+    opacity: 0.3;
+  }
+}
+
+.main-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  position: relative;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.left-panel {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 300px;
+  height: 100%;
+}
+
+.center-panel {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+}
+
+.right-panel {
+  flex: 3;
+  min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 250px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 2px dashed rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.no-content-placeholder::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+}
+
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 背景装饰音符 */
+.splash-bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.floating-note {
+  position: absolute;
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.1);
+  animation: floatNote 8s ease-in-out infinite;
+}
+
+.note-1 {
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.note-2 {
+  top: 20%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.note-3 {
+  top: 60%;
+  left: 5%;
+  animation-delay: 2s;
+}
+
+.note-4 {
+  bottom: 20%;
+  right: 10%;
+  animation-delay: 3s;
+}
+
+.note-5 {
+  top: 40%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+.note-6 {
+  bottom: 40%;
+  left: 20%;
+  animation-delay: 5s;
+}
+
+@keyframes floatNote {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.1;
+  }
+  50% {
+    transform: translateY(-20px) rotate(180deg);
+    opacity: 0.3;
+  }
+}
+
+.main-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  position: relative;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.left-panel {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 300px;
+  height: 100%;
+}
+
+.center-panel {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+}
+
+.right-panel {
+  flex: 3;
+  min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 250px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 2px dashed rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.no-content-placeholder::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+}
+
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 背景装饰音符 */
+.splash-bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.floating-note {
+  position: absolute;
+  font-size: 2rem;
+  color: rgba(255, 255, 255, 0.1);
+  animation: floatNote 8s ease-in-out infinite;
+}
+
+.note-1 {
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.note-2 {
+  top: 20%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.note-3 {
+  top: 60%;
+  left: 5%;
+  animation-delay: 2s;
+}
+
+.note-4 {
+  bottom: 20%;
+  right: 10%;
+  animation-delay: 3s;
+}
+
+.note-5 {
+  top: 40%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+.note-6 {
+  bottom: 40%;
+  left: 20%;
+  animation-delay: 5s;
+}
+
+@keyframes floatNote {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.1;
+  }
+  50% {
+    transform: translateY(-20px) rotate(180deg);
+    opacity: 0.3;
+  }
+}
+
+.main-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  position: relative;
+}
+
+.app-header {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.left-panel {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 300px;
+  height: 100%;
+}
+
+.center-panel {
+  flex: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+}
+
+.right-panel {
+  flex: 3;
+  min-width: 300px;
+}
+
+.no-content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 250px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 2px dashed rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.no-content-placeholder::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+
+.no-content-placeholder p {
+  font-size: 1.1rem;
+  margin: 0;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* 启动动画屏幕样式 */
+.splash-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.splash-content {
+  text-align: center;
+  color: white;
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container {
+  position: relative;
+  margin-bottom: 3rem;
+}
+
+.logo-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: logoFloat 3s ease-in-out infinite;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.logo-rings {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.ring {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  animation: ringPulse 2s ease-in-out infinite;
+}
+
+.ring-1 {
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  animation-delay: 0s;
+}
+
+.ring-2 {
+  width: 160px;
+  height: 160px;
+  margin: -80px 0 0 -80px;
+  animation-delay: 0.5s;
+}
+
+.ring-3 {
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  animation-delay: 1s;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+}
+
+.project-title {
+  margin-bottom: 4rem;
+}
+
+.title-main {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  background: linear-gradient(45deg, #ffffff, #e0e7ff, #ffffff);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: titleShimmer 3s ease-in-out infinite, titleSlideIn 1s ease-out;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes titleShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes titleSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.title-divider {
+  width: 100px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, white, transparent);
+  margin: 1rem auto;
+  animation: dividerExpand 1.5s ease-out 0.5s forwards;
+  transform: scaleX(0);
+}
+
+@keyframes dividerExpand {
+  to { transform: scaleX(1); }
+}
+
+.title-sub {
+  font-size: 1.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+  animation: titleSlideIn 1s ease-out 0.7s forwards;
+  opacity: 0;
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+
+.loading-indicator {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
 }
 </style>
 

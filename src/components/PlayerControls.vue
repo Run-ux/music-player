@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import PlayModeControl from './PlayModeControl.vue';
-import { usePlayerStore, SongInfo, MediaType } from '../stores/player';
+import { usePlayerStore, SongInfo, MediaType, PlayerState } from '../stores/player';
 
 const props = defineProps<{
   currentSong: SongInfo | null;
@@ -27,10 +26,32 @@ const playerStore = usePlayerStore();
 
 // 播放控制 - 合并播放和暂停为一个切换功能
 const handlePlayPause = () => {
-  if (props.isPlaying) {
-    emit('pause');
-  } else {
+  console.log('🎮 播放/暂停按钮点击，当前状态:', props.isPlaying);
+  
+  // 关键修复：立即更新UI状态，避免延迟感
+  const willBePlaying = !props.isPlaying;
+  
+  if (willBePlaying) {
+    console.log('🎬 用户点击播放');
     emit('play');
+  } else {
+    console.log('⏸️ 用户点击暂停');
+    emit('pause');
+  }
+  
+  // 新增：对于视频模式，增加额外的状态确认
+  const isVideoMode = props.currentSong?.mediaType === 'Video' || 
+                     (playerStore.currentPlaybackMode === 'Video' && props.currentSong?.mvPath);
+  
+  if (isVideoMode) {
+    console.log('🎬 视频模式播放控制，确保状态同步');
+    // 延迟检查状态一致性
+    setTimeout(() => {
+      // 检查是否需要状态修正
+      if (playerStore.isPlaying !== willBePlaying) {
+        console.log('🔧 播放键：检测到状态不一致，可能需要重试');
+      }
+    }, 200);
   }
 };
 
@@ -186,10 +207,10 @@ onMounted(async () => {
 
 // 新增：直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
 watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDuration]) => {
-  // 关键修复：增加更智能的保护逻辑
+  // 关键修复：增加更智能的保护逻辑和类型安全
   const shouldUpdateProgress = !isDragging.value && !isUserJumping.value;
   
-  if (shouldUpdateProgress) {
+  if (shouldUpdateProgress && typeof newPosition === 'number' && typeof newDuration === 'number') {
     // 检查是否是视频模式下的自然进度更新
     const isVideoMode = props.currentSong?.mediaType === 'Video' || 
                        (playerStore.currentPlaybackMode === 'Video' && props.currentSong?.mvPath);
@@ -221,6 +242,16 @@ watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDura
   }
 }, { immediate: true });
 
+// 关键修复：单独监听播放状态变化
+watch(() => playerStore.state, (newState) => {
+  // 确保播放按钮状态与实际播放状态同步
+  if (newState === PlayerState.Playing && !props.isPlaying) {
+    console.log('🔧 检测到状态不同步：后端播放但前端暂停，可能需要状态修正');
+  } else if (newState === PlayerState.Paused && props.isPlaying) {
+    console.log('🔧 检测到状态不同步：后端暂停但前端播放，可能需要状态修正');
+  }
+});
+
 // 监听当前歌曲变化，确保props变化时也重置进度条
 watch(() => props.currentSong, (newSong, oldSong) => {
   if (newSong && (!oldSong || newSong.path !== oldSong.path)) {
@@ -230,63 +261,6 @@ watch(() => props.currentSong, (newSong, oldSong) => {
     console.log('Props歌曲变化，进度条重置:', newSong.title);
   }
 }, { deep: true });
-
-// 播放模式相关状态和计算属性
-const supportsModeSwitch = computed(() => {
-  if (!props.currentSong) return false;
-  
-  // 纯视频文件不支持切换到音频模式
-  if (props.currentSong.mediaType === MediaType.Video) {
-    return false;
-  }
-  
-  // 音频文件只有在有MV时才支持切换
-  return props.currentSong.mediaType === MediaType.Audio && props.currentSong.mvPath;
-});
-
-// 当前播放模式
-const isVideoMode = computed(() => {
-  return playerStore.currentPlaybackMode === MediaType.Video;
-});
-
-// 切换播放模式
-const handleTogglePlaybackMode = async () => {
-  if (!supportsModeSwitch.value) {
-    console.warn('当前歌曲不支持播放模式切换');
-    return;
-  }
-  
-  try {
-    const oldMode = isVideoMode.value ? MediaType.Video : MediaType.Audio;
-    const newMode = isVideoMode.value ? MediaType.Audio : MediaType.Video;
-    console.log('🔄 PlayerControls切换播放模式:', oldMode, '->', newMode);
-    
-    // 调用后端切换播放模式
-    await playerStore.setPlaybackMode(newMode);
-    
-    // 关键修复：视频切音频后给一个短暂延迟确保后端处理完成
-    if (oldMode === MediaType.Video && newMode === MediaType.Audio) {
-      console.log('视频切音频，等待后端完成处理...');
-      
-      // 等待一小段时间确保后端音频播放器准备就绪
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // 检查播放状态，如果不是播放状态则强制播放
-      if (!props.isPlaying) {
-        console.log('检测到音频未自动播放，手动启动播放');
-        try {
-          await playerStore.play();
-        } catch (error) {
-          console.warn('手动启动音频播放失败:', error);
-        }
-      }
-    }
-    
-    console.log('✅ 播放模式切换成功:', newMode);
-  } catch (error) {
-    console.error('❌ 切换播放模式失败:', error);
-  }
-};
 </script>
 
 <template>

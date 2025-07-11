@@ -41,12 +41,25 @@ const songAlbum = computed(() => {
 const supportsModeSwitch = computed(() => {
   if (!props.song) return false;
   
-  // 纯视频文件不支持切换到音频模式
-  if (props.song.mediaType === MediaType.Video) {
-    return false;
-  }
-  
-  // 音频文件只有在有MV时才支持切换
+  // 总是显示音频按钮，只要有歌曲就显示
+  // 如果是纯视频文件，只显示MV按钮
+  // 如果是音频文件，总是显示音频按钮，有MV时还显示MV按钮
+  return true;
+});
+
+// 显示音频按钮的条件
+const showAudioButton = computed(() => {
+  if (!props.song) return false;
+  // 纯视频文件不显示音频按钮
+  return props.song.mediaType !== MediaType.Video;
+});
+
+// 显示MV按钮的条件
+const showVideoButton = computed(() => {
+  if (!props.song) return false;
+  // 纯视频文件总是显示MV按钮
+  if (props.song.mediaType === MediaType.Video) return true;
+  // 音频文件有MV时显示MV按钮
   return props.song.mediaType === MediaType.Audio && props.song.mvPath;
 });
 
@@ -139,7 +152,7 @@ onUnmounted(() => {
 
 <template>
   <div class="now-playing card">
-    <div class="album-cover">
+    <div class="album-cover animate-scale-in">
       <div 
         ref="coverElement"
         class="cover-container"
@@ -150,11 +163,10 @@ onUnmounted(() => {
           class="cover-image"
           @error="($event.target as HTMLImageElement).src = '/src/assets/default-cover.jpg'"
         />
-        
       </div>
     </div>
     
-    <div class="song-details">
+    <div class="song-details animate-slide-up-stagger">
       <div class="song-title">{{ songTitle }}</div>
       <div class="song-artist">{{ songArtist }}</div>
       <div class="song-album">{{ songAlbum }}</div>
@@ -162,8 +174,9 @@ onUnmounted(() => {
       <!-- 播放模式切换按钮 -->
       <div v-if="supportsModeSwitch" class="mode-switch-controls">
         <button 
+          v-if="showAudioButton"
           @click="togglePlaybackMode"
-          class="mode-switch-btn btn-secondary"
+          class="mode-switch-btn btn-secondary animate-button-pop"
           :class="{ 'btn-primary': !isVideoMode, 'active': !isVideoMode }"
           :title="'音频模式'"
         >
@@ -174,10 +187,12 @@ onUnmounted(() => {
         </button>
         
         <button 
+          v-if="showVideoButton"
           @click="togglePlaybackMode"
-          class="mode-switch-btn btn-secondary"
+          class="mode-switch-btn btn-secondary animate-button-pop"
           :class="{ 'btn-primary': isVideoMode, 'active': isVideoMode }"
           :title="'MV模式'"
+          style="animation-delay: 0.1s;"
         >
           <svg class="mode-icon" viewBox="0 0 24 24">
             <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
@@ -317,10 +332,11 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 0;
-  background: var(--background-glass);
-  padding: 0.5rem 0.875rem;
-  border-radius: var(--radius-md);
-  backdrop-filter: blur(10px);
+  /* 移除背景框和装饰效果 */
+  /* background: var(--background-glass); */
+  /* padding: 0.5rem 0.875rem; */
+  /* border-radius: var(--radius-md); */
+  /* backdrop-filter: blur(10px); */
 }
 
 .mode-switch-controls {
@@ -378,6 +394,71 @@ onUnmounted(() => {
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* NowPlaying组件内部动画 */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUpStagger {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes buttonPop {
+  from {
+    opacity: 0;
+    transform: scale(0.8) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 快速显示动画 - 移除延迟 */
+.animate-scale-in {
+  animation: scaleIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  opacity: 0;
+}
+
+.animate-slide-up-stagger {
+  opacity: 0;
+  animation: slideUpStagger 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-slide-up-stagger .song-title {
+  opacity: 0;
+  animation: slideUpStagger 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.1s forwards;
+}
+
+.animate-slide-up-stagger .song-artist {
+  opacity: 0;
+  animation: slideUpStagger 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.2s forwards;
+}
+
+.animate-slide-up-stagger .song-album {
+  opacity: 0;
+  animation: slideUpStagger 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+}
+
+.animate-button-pop {
+  opacity: 0;
+  animation: buttonPop 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.4s forwards;
 }
 
 /* 响应式设计 */

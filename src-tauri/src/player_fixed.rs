@@ -925,4 +925,10 @@ pub enum PlayerCommand {
     // 新增：切换播放模式命令
     TogglePlaybackMode, // 在音频模式和MV模式之间切换
     SetPlaybackMode(MediaType), // 直接设置播放模式（音频或视频）
+    // 新增：音视频互斥控制命令
+    ForceStopAudio,     // 强制停止音频播放
+    ForceStopVideo,     // 强制停止视频播放
+    ForceStopAll,       // 强制停止所有播放
+    ActivateAudioPlayer, // 激活音频播放器
+    ActivateVideoPlayer, // 激活视频播放器
 }

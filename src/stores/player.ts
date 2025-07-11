@@ -60,6 +60,46 @@ export const usePlayerStore = defineStore('player', () => {
   const positionUpdateCount = ref(0); // 进度更新计数器
   const isNewSong = ref(false); // 是否是新歌曲开始
   
+  // 新增：音视频互斥播放控制
+  const isVideoPlayerActive = ref(false); // 视频播放器是否激活
+  const isAudioPlayerActive = ref(false); // 音频播放器是否激活
+  const mutexLock = ref(false); // 互斥锁，防止同时播放
+  
+  // 新增：强制互斥检查方法
+  const ensureMutualExclusion = () => {
+    if (isVideoPlayerActive.value && isAudioPlayerActive.value) {
+      console.warn('⚠️ 检测到音视频同时激活，强制停止音频播放');
+      deactivateAudioPlayer();
+      // 强制停止后端音频
+      invoke('pause').catch(console.error);
+    }
+  };
+  
+  // 新增：全局播放状态检查
+  const checkPlaybackState = () => {
+    const hasActivePlayer = isVideoPlayerActive.value || isAudioPlayerActive.value;
+    const shouldBePlaying = state.value === PlayerState.Playing;
+    
+    if (shouldBePlaying && !hasActivePlayer) {
+      console.warn('⚠️ 播放状态不一致：应该播放但没有激活的播放器');
+      // 根据当前歌曲类型重新激活对应播放器
+      const current = currentSong.value;
+      if (current) {
+        const isVideoMode = current.mediaType === MediaType.Video || 
+                           (currentPlaybackMode.value === MediaType.Video && current.mvPath);
+        if (isVideoMode) {
+          activateVideoPlayer();
+        } else {
+          activateAudioPlayer();
+        }
+      }
+    } else if (!shouldBePlaying && hasActivePlayer) {
+      console.warn('⚠️ 播放状态不一致：不应该播放但有激活的播放器');
+      deactivateVideoPlayer();
+      deactivateAudioPlayer();
+    }
+  };
+  
   // 计算属性
   const isPlaying = computed(() => state.value === PlayerState.Playing);
   
@@ -70,6 +110,9 @@ export const usePlayerStore = defineStore('player', () => {
     
     // 如果正在跳转，不显示播放状态
     if (isTransitioning.value) return false;
+    
+    // 强制互斥检查
+    ensureMutualExclusion();
     
     // 如果是新歌曲且播放很快开始，直接显示播放状态
     if (isNewSong.value && isActuallyPlaying.value) {
@@ -92,8 +135,110 @@ export const usePlayerStore = defineStore('player', () => {
     return null;
   });
   
+  // 增强：音视频互斥控制方法
+  const activateVideoPlayer = () => {
+    if (mutexLock.value) {
+      console.log('🔒 互斥锁激活中，等待解锁...');
+      return false;
+    }
+    
+    mutexLock.value = true;
+    
+    // 强制停止音频播放器
+    if (isAudioPlayerActive.value) {
+      console.log('🎵➡️🎬 强制停止音频播放，激活视频播放器');
+      isAudioPlayerActive.value = false;
+      // 立即调用后端停止音频
+      invoke('pause').catch(console.error);
+    }
+    
+    isVideoPlayerActive.value = true;
+    console.log('✅ 视频播放器已激活');
+    
+    // 延迟解锁，确保状态切换完成
+    setTimeout(() => {
+      mutexLock.value = false;
+      // 解锁后进行状态检查
+      setTimeout(checkPlaybackState, 100);
+    }, 200);
+    
+    return true;
+  };
+  
+  // 关键修复：优化音频播放器激活逻辑，减少不必要的暂停
+  const activateAudioPlayer = () => {
+    if (mutexLock.value) {
+      console.log('🔒 互斥锁激活中，等待解锁...');
+      return false;
+    }
+    
+    mutexLock.value = true;
+    
+    // 关键修复：只有在视频播放器真正在播放时才强制停止
+    if (isVideoPlayerActive.value) {
+      console.log('🎬➡️🎵 检测到视频播放器激活，停止视频播放');
+      isVideoPlayerActive.value = false;
+      // 发送信号给VideoPlayer组件停止播放
+      // 这通过响应式状态变化来实现
+    }
+    
+    isAudioPlayerActive.value = true;
+    console.log('✅ 音频播放器已激活');
+    
+    // 缩短解锁时间，提高响应速度
+    setTimeout(() => {
+      mutexLock.value = false;
+      // 解锁后进行状态检查
+      setTimeout(checkPlaybackState, 50);
+    }, 100);
+    
+    return true;
+  };
+  
+  const deactivateVideoPlayer = () => {
+    if (isVideoPlayerActive.value) {
+      isVideoPlayerActive.value = false;
+      console.log('🎬 视频播放器已停用');
+    }
+  };
+  
+  const deactivateAudioPlayer = () => {
+    if (isAudioPlayerActive.value) {
+      isAudioPlayerActive.value = false;
+      console.log('🎵 音频播放器已停用');
+    }
+  };
+  
+  // 新增：强制停止所有播放器
+  const stopAllPlayers = async () => {
+    console.log('🛑 强制停止所有播放器');
+    
+    mutexLock.value = true;
+    
+    // 停止视频播放器
+    if (isVideoPlayerActive.value) {
+      deactivateVideoPlayer();
+    }
+    
+    // 停止音频播放器
+    if (isAudioPlayerActive.value) {
+      deactivateAudioPlayer();
+      try {
+        await invoke('pause');
+      } catch (error) {
+        console.error('停止音频播放失败:', error);
+      }
+    }
+    
+    setTimeout(() => {
+      mutexLock.value = false;
+    }, 100);
+  };
+  
   // 方法
   const play = async () => {
+    console.log('🎮 开始播放流程');
+    
     // 如果没有选中歌曲且播放列表不为空，自动选择第一首歌曲
     if (currentIndex.value === null && playlist.value.length > 0) {
       await setCurrentSong(0);
@@ -105,36 +250,131 @@ export const usePlayerStore = defineStore('player', () => {
       return;
     }
     
-    await invoke('play');
+    // 检查当前播放模式，决定激活哪个播放器
+    const current = currentSong.value;
+    const isVideoMode = current?.mediaType === MediaType.Video || 
+                        (currentPlaybackMode.value === MediaType.Video && current?.mvPath);
+    
+    console.log('🎯 播放模式判断:', {
+      isVideoMode,
+      mediaType: current?.mediaType,
+      playbackMode: currentPlaybackMode.value,
+      hasMv: !!current?.mvPath
+    });
+    
+    // 关键修复：只有在模式切换时才强制停止所有播放器
+    const needsModeSwitch = (isVideoMode && isAudioPlayerActive.value) || 
+                         (!isVideoMode && isVideoPlayerActive.value);
+  
+    if (needsModeSwitch) {
+      console.log('🔄 检测到播放模式切换，停止当前播放器');
+      await stopAllPlayers();
+      // 等待停止完成
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    if (isVideoMode) {
+      // 视频模式：激活视频播放器
+      console.log('🎬 激活视频播放器');
+      if (!activateVideoPlayer()) {
+        console.error('视频播放器激活失败');
+        return;
+      }
+    } else {
+      // 音频模式：激活音频播放器并调用后端
+      console.log('🎵 激活音频播放器');
+      if (!activateAudioPlayer()) {
+        console.error('音频播放器激活失败');
+        return;
+      }
+      
+      try {
+        await invoke('play');
+        console.log('✅ 后端音频播放命令发送成功');
+      } catch (error) {
+        console.error('后端音频播放失败:', error);
+        deactivateAudioPlayer();
+        return;
+      }
+    }
+    
+    // 关键修复：立即设置播放状态，确保UI响应迅速
     state.value = PlayerState.Playing;
+    console.log('✅ 播放流程完成，状态已设置为播放');
   };
   
   const pause = async () => {
-    await invoke('pause');
+    console.log('⏸️ 开始暂停流程');
+    
+    // 关键修复：根据当前激活的播放器进行针对性暂停
+    if (isVideoPlayerActive.value) {
+      console.log('⏸️ 停用视频播放器');
+      deactivateVideoPlayer();
+    }
+    
+    if (isAudioPlayerActive.value) {
+      console.log('⏸️ 停用音频播放器');
+      deactivateAudioPlayer();
+      try {
+        await invoke('pause');
+      } catch (error) {
+        console.error('停止音频播放失败:', error);
+      }
+    }
+    
+    // 关键修复：立即设置暂停状态，确保UI响应迅速
     state.value = PlayerState.Paused;
+    console.log('✅ 暂停流程完成，状态已设置为暂停');
   };
   
   const next = async () => {
-    console.log('切换到下一首歌曲');
-    await invoke('next');
-    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
-    state.value = PlayerState.Playing;
+    console.log('⏭️ 切换到下一首歌曲');
+    
+    // 切歌前先停止所有播放器
+    await stopAllPlayers();
+    
+    try {
+      await invoke('next');
+      // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+      state.value = PlayerState.Playing;
+      console.log('✅ 下一首切换完成');
+    } catch (error) {
+      console.error('切换下一首失败:', error);
+    }
   };
   
   const previous = async () => {
-    console.log('切换到上一首歌曲');
-    await invoke('previous');
-    // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
-    state.value = PlayerState.Playing;
+    console.log('⏮️ 切换到上一首歌曲');
+    
+    // 切歌前先停止所有播放器
+    await stopAllPlayers();
+    
+    try {
+      await invoke('previous');
+      // 重要：确保前端状态也更新为播放状态，因为后端在切换时会自动开始播放
+      state.value = PlayerState.Playing;
+      console.log('✅ 上一首切换完成');
+    } catch (error) {
+      console.error('切换上一首失败:', error);
+    }
   };
   
   const setCurrentSong = async (index: number) => {
     if (index >= 0 && index < playlist.value.length) {
-      console.log('用户选择歌曲:', index);
-      await invoke('set_song', { index });
-      currentIndex.value = index;
-      // 重要：确保前端状态也更新为播放状态，因为后端在设置歌曲时会自动开始播放
-      state.value = PlayerState.Playing;
+      console.log('🎵 用户选择歌曲:', index, playlist.value[index]?.title);
+      
+      // 选歌前先停止所有播放器
+      await stopAllPlayers();
+      
+      try {
+        await invoke('set_song', { index });
+        currentIndex.value = index;
+        // 重要：确保前端状态也更新为播放状态，因为后端在设置歌曲时会自动开始播放
+        state.value = PlayerState.Playing;
+        console.log('✅ 歌曲选择完成');
+      } catch (error) {
+        console.error('选择歌曲失败:', error);
+      }
     }
   };
   
@@ -161,13 +401,6 @@ export const usePlayerStore = defineStore('player', () => {
     await invoke('open_audio_files');
   };
 
-  // 添加跳转功能
-  const seekVideoTo = async (position: number) => {
-    // 直接更新前端进度显示，给用户即时反馈
-    position.value = position;
-    console.log('视频跳转请求:', position, '秒');
-  };
-
   // 完全重写seekTo方法，彻底分离音频和视频跳转逻辑
   const seekTo = async (targetPosition: number) => {
     try {
@@ -177,33 +410,32 @@ export const usePlayerStore = defineStore('player', () => {
         return;
       }
 
-      console.log('跳转请求:', {
-        position: targetPosition,
-        song: current.title,
-        playbackMode: currentPlaybackMode.value,
-        mediaType: current.mediaType,
-        mvPath: current.mvPath
-      });
-
-      // 关键修复：更精确的视频模式判断逻辑
-      const isVideoFile = current.mediaType === MediaType.Video;
-      const isMvMode = currentPlaybackMode.value === MediaType.Video && current.mvPath;
-      const isVideoMode = isVideoFile || isMvMode;
-
+      console.log('🎯 智能跳转开始:', targetPosition, '秒，当前歌曲:', current.title);
+      
+      // 设置跳转状态，防止其他事件干扰
+      setTransitioning(true);
+      
+      // 检查是否是视频模式
+      const isVideoMode = current.mediaType === MediaType.Video || 
+                         (currentPlaybackMode.value === MediaType.Video && current.mvPath);
+      
       if (isVideoMode) {
-        // 视频模式：完全不调用后端，只更新前端状态
-        console.log('🎬 视频模式跳转 - 纯前端处理，不触发后端SeekTo');
+        console.log('🎬 视频模式跳转 - 完全由前端VideoPlayer处理');
         
         // 立即更新前端进度，给用户即时反馈
         position.value = targetPosition;
         
-        // 关键：不调用任何后端API，完全由VideoPlayer组件处理视频跳转
-        // 这避免了后端音频播放器被触发的问题
-        return;
+        // 关键修复：通知VideoPlayer组件进行跳转，但不调用后端API
+        // VideoPlayer会监听position变化并执行视频跳转
+        
+        // 延迟重置状态，给VideoPlayer足够时间处理
+        setTimeout(() => {
+          setTransitioning(false);
+          console.log('视频跳转流程完成');
+        }, 800);
       } else {
         // 音频模式：正常调用后端跳转
         console.log('🎵 音频模式跳转 - 调用后端API');
-        setTransitioning(true);
         
         // 立即更新前端进度，给用户即时反馈
         position.value = targetPosition;
@@ -248,6 +480,12 @@ export const usePlayerStore = defineStore('player', () => {
       lastPositionUpdate.value = now;
       positionUpdateCount.value++;
       
+      // 关键修复：确保播放状态一致性
+      if (state.value !== PlayerState.Playing && positionUpdateCount.value >= 2) {
+        console.log('🔧 检测到正在播放但状态不是播放，修正状态');
+        state.value = PlayerState.Playing;
+      }
+      
       // 视频文件或新歌曲快速开始播放的情况
       if ((isVideo || isNewSong.value) && positionUpdateCount.value >= 1) {
         console.log(isVideo ? '视频播放状态确认' : '新歌曲快速开始播放');
@@ -258,7 +496,19 @@ export const usePlayerStore = defineStore('player', () => {
       isActuallyPlaying.value = false;
       console.log('检测到位置跳跃，重置播放状态');
     } else if (now - lastPositionUpdate.value > (isVideo ? 3000 : 2000)) {
-      // 视频文件给予更长的检测时间（3秒 vs 2秒）
+      // 关键修复：如果长时间没有进度更新且当前是播放状态，检查是否需要修正
+      if (state.value === PlayerState.Playing) {
+        console.log('⚠️ 长时间无进度更新但状态为播放，可能需要状态修正');
+        // 不立即修改状态，给一些缓冲时间
+        setTimeout(() => {
+          if (now - lastPositionUpdate.value > (isVideo ? 5000 : 3000) && 
+              state.value === PlayerState.Playing) {
+            console.log('🔧 确认无播放活动，修正状态为暂停');
+            state.value = PlayerState.Paused;
+            isActuallyPlaying.value = false;
+          }
+        }, 1000);
+      }
       isActuallyPlaying.value = false;
       positionUpdateCount.value = 0;
     }
@@ -420,6 +670,8 @@ export const usePlayerStore = defineStore('player', () => {
     isReallyPlaying, // 智能播放状态
     isTransitioning, // 跳转状态
     isNewSong, // 新歌曲状态
+    isVideoPlayerActive, // 视频播放器激活状态
+    isAudioPlayerActive, // 音频播放器激活状态
     
     // 计算属性
     isPlaying,
@@ -450,5 +702,10 @@ export const usePlayerStore = defineStore('player', () => {
     togglePlaybackMode, // 新增：切换播放模式
     setPlaybackMode,    // 新增：设置播放模式
     initializePlaybackMode, // 新增：初始化播放模式
+    // 新增：音视频互斥控制方法
+    activateVideoPlayer,
+    activateAudioPlayer,
+    deactivateVideoPlayer,
+    deactivateAudioPlayer,
   };
 });
