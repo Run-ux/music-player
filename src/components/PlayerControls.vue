@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import PlayModeControl from './PlayModeControl.vue';
-import { usePlayerStore, SongInfo } from '../stores/player';
+import PlaybackModeControl from './PlaybackModeControl.vue';
+import { usePlayerStore, SongInfo, MediaType, PlayerState } from '../stores/player';
 
 const props = defineProps<{
   currentSong: SongInfo | null;
@@ -27,9 +27,14 @@ const playerStore = usePlayerStore();
 
 // 播放控制 - 合并播放和暂停为一个切换功能
 const handlePlayPause = () => {
+  console.log('🎮 播放/暂停按钮点击，当前状态:', props.isPlaying);
+  
+  // 关键修复：直接使用简化的播放状态，避免复杂判断
   if (props.isPlaying) {
+    console.log('⏸️ 用户点击暂停');
     emit('pause');
   } else {
+    console.log('🎬 用户点击播放');
     emit('play');
   }
 };
@@ -186,13 +191,50 @@ onMounted(async () => {
 
 // 直接监听playerStore的进度变化，确保视频模式下进度条也能自动前进
 watch(() => [playerStore.position, playerStore.duration], ([newPosition, newDuration]) => {
-  // 只有在不是用户拖拽且不是用户跳转时才更新进度条
-  if (!isDragging.value && !isUserJumping.value) {
-    position.value = newPosition;
-    duration.value = newDuration;
-    progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+  // 关键修复：增加更智能的保护逻辑和类型安全
+  const shouldUpdateProgress = !isDragging.value && !isUserJumping.value;
+  
+  if (shouldUpdateProgress && typeof newPosition === 'number' && typeof newDuration === 'number') {
+    // 检查是否是视频模式下的自然进度更新
+    const isVideoMode = props.currentSong?.mediaType === 'Video' || 
+                       (playerStore.currentPlaybackMode === 'Video' && props.currentSong?.mvPath);
+    
+    if (isVideoMode) {
+      // 视频模式：更温和地更新进度条，避免突兀变化
+      const oldPosition = position.value;
+      const positionDiff = Math.abs(newPosition - oldPosition);
+      
+      // 如果位置变化很大（可能是跳转），立即更新
+      // 如果是小幅变化（正常播放），平滑更新
+      if (positionDiff > 2) {
+        console.log('PlayerControls: 检测到视频跳转，立即更新进度条:', newPosition);
+        position.value = newPosition;
+        duration.value = newDuration;
+        progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+      } else {
+        // 平滑更新，避免进度条抖动
+        position.value = newPosition;
+        duration.value = newDuration;
+        progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+      }
+    } else {
+      // 音频模式：正常更新
+      position.value = newPosition;
+      duration.value = newDuration;
+      progress.value = newDuration > 0 ? (newPosition / newDuration) * 100 : 0;
+    }
   }
 }, { immediate: true });
+
+// 关键修复：单独监听播放状态变化
+watch(() => playerStore.state, (newState) => {
+  // 确保播放按钮状态与实际播放状态同步
+  if (newState === PlayerState.Playing && !props.isPlaying) {
+    console.log('🔧 检测到状态不同步：后端播放但前端暂停，可能需要状态修正');
+  } else if (newState === PlayerState.Paused && props.isPlaying) {
+    console.log('🔧 检测到状态不同步：后端暂停但前端播放，可能需要状态修正');
+  }
+});
 
 // 监听当前歌曲变化，确保props变化时也重置进度条
 watch(() => props.currentSong, (newSong, oldSong) => {
@@ -206,11 +248,11 @@ watch(() => props.currentSong, (newSong, oldSong) => {
 </script>
 
 <template>
-  <div class="player-controls">
+  <div class="player-controls card">
     <div class="progress-bar">
       <div class="progress-info">
-        <span>{{ formatTime(position) }}</span>
-        <span>{{ formatTime(duration) }}</span>
+        <span class="time-display">{{ formatTime(position) }}</span>
+        <span class="time-display">{{ formatTime(duration) }}</span>
       </div>
       <div class="progress-container" @click="handleProgressClick">
         <div class="progress" :style="{ width: `${progress}%` }" v-show="progress > 0"></div>
@@ -225,87 +267,131 @@ watch(() => props.currentSong, (newSong, oldSong) => {
     </div>
     
     <div class="control-buttons">
-      <button @click="handlePrevious" class="control-btn">
+      <button @click="handlePrevious" class="control-btn btn-secondary">
         <i class="icon-previous">⏮</i>
       </button>
-      <button @click="handlePlayPause" class="control-btn" :class="{ 'play': !isPlaying, 'pause': isPlaying }">
+      <button @click="handlePlayPause" class="control-btn play-pause-btn btn-primary" :class="{ 'playing': isPlaying }">
         <i v-if="!isPlaying" class="icon-play">▶</i>
         <i v-else class="icon-pause">⏸</i>
       </button>
-      <button @click="handleNext" class="control-btn">
+      <button @click="handleNext" class="control-btn btn-secondary">
         <i class="icon-next">⏭</i>
       </button>
     </div>
     
-    <!-- 添加播放模式控制 -->
+    <!-- 保留原有的播放模式控制 -->
     <div class="play-mode-section">
-      <PlayModeControl />
+      <div class="mode-controls-container">
+        <PlayModeControl />
+        <PlaybackModeControl />
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .player-controls {
-  padding: 1rem;
-  border-radius: 8px;
-  background: #f5f5f5;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  padding: 1.25rem;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 200px;
+}
+
+.player-controls::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  border-radius: var(--radius-lg);
+  z-index: -1;
 }
 
 .progress-bar {
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .progress-info {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
-  color: #555;
+  margin-bottom: 0.75rem;
+}
+
+.time-display {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--background-glass);
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(10px);
 }
 
 .progress-container {
-  height: 8px;
-  background-color: #ddd;
-  border-radius: 4px;
-  overflow: visible; /* 改为visible以便手柄可以正确显示 */
+  height: 6px;
+  background: rgba(102, 126, 234, 0.15);
+  border-radius: var(--radius-sm);
+  overflow: visible;
   cursor: pointer;
   position: relative;
-  transition: height 0.2s ease;
+  transition: all var(--transition-fast);
 }
 
 .progress-container:hover {
-  height: 10px;
+  height: 8px;
+  background: rgba(102, 126, 234, 0.2);
 }
 
 .progress {
   height: 100%;
-  background: linear-gradient(90deg, #4caf50, #66bb6a);
+  background: var(--primary-gradient);
   transition: width 0.1s ease-out;
-  border-radius: 4px;
-  min-width: 0; /* 确保宽度为0时不显示 */
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .progress-container:hover .progress {
-  box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);
+  box-shadow: 0 0 12px rgba(102, 126, 234, 0.4);
 }
 
 .progress-handle {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 12px;
-  height: 12px;
-  background: #4caf50;
-  border: 2px solid #fff;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border: 3px solid var(--primary-color);
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-normal);
   opacity: 0;
   pointer-events: none;
+  box-shadow: var(--shadow-md);
 }
 
-/* 只有在有进度或者hover时才显示手柄 */
 .progress-container:hover .progress-handle,
 .progress-handle.active {
   opacity: 1;
@@ -313,15 +399,18 @@ watch(() => props.currentSong, (newSong, oldSong) => {
 }
 
 .progress-handle:hover {
-  background: #45a049;
-  transform: translate(-50%, -50%) scale(1.15); /* 缩小hover放大倍数 */
+  background: var(--primary-color);
+  border-color: white;
+  transform: translate(-50%, -50%) scale(1.2);
+  box-shadow: var(--shadow-lg);
 }
 
-/* 添加拖拽状态样式 */
 .progress-handle.dragging {
   cursor: grabbing;
-  background: #388e3c;
-  transform: translate(-50%, -50%) scale(1.2);
+  background: var(--primary-dark);
+  border-color: white;
+  transform: translate(-50%, -50%) scale(1.3);
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
 }
 
 .control-buttons {
@@ -329,43 +418,86 @@ watch(() => props.currentSong, (newSong, oldSong) => {
   justify-content: center;
   align-items: center;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .control-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 1.5rem;
-  color: #333;
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  transition: all 0.2s;
+  font-size: 1.2rem;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
 }
 
-.control-btn:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+.control-btn i {
+  position: relative;
+  z-index: 2;
 }
 
-.play, .pause {
-  font-size: 1.8rem;
-  background-color: #e0f7e0;
-  border: 1px solid #4caf50;
-  color: #4caf50;
+.play-pause-btn {
+  width: 56px;
+  height: 56px;
+  font-size: 1.4rem;
+  position: relative;
 }
 
-.play:hover, .pause:hover {
-  background-color: #d0f0d0;
+.play-pause-btn.playing {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: var(--shadow-primary);
+  }
+  50% {
+    box-shadow: 0 6px 30px rgba(102, 126, 234, 0.5);
+  }
 }
 
 .play-mode-section {
   display: flex;
   justify-content: center;
-  padding-top: 0.5rem;
-  border-top: 1px solid #eee;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-light);
+  margin-top: auto;
+}
+
+.mode-controls-container {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .player-controls {
+    padding: 1rem;
+    min-height: 180px;
+  }
+  
+  .control-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.1rem;
+  }
+  
+  .play-pause-btn {
+    width: 52px;
+    height: 52px;
+    font-size: 1.3rem;
+  }
+  
+  .control-buttons {
+    gap: 0.75rem;
+  }
+  
+  .time-display {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.5rem;
+  }
 }
 </style>

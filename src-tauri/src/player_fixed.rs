@@ -207,6 +207,28 @@ impl SongInfo {
         self.mv_path.is_some()
     }
 
+    /// 检查是否支持播放模式切换
+    /// 只有音频文件且有对应MV文件的歌曲才支持模式切换
+    /// 纯视频文件不支持切换到音频模式
+    pub fn supports_mode_switching(&self) -> bool {
+        match self.media_type {
+            Some(MediaType::Audio) => {
+                // 音频文件：只有有MV时才支持切换
+                self.mv_path.is_some()
+            },
+            Some(MediaType::Video) => {
+                // 纯视频文件：不支持切换到音频模式
+                false
+            },
+            None => false,
+        }
+    }
+
+    /// 检查是否为纯视频文件（没有对应音频轨道的视频）
+    pub fn is_pure_video(&self) -> bool {
+        self.media_type == Some(MediaType::Video)
+    }
+
     /// 检查是否为视频格式
     fn is_video_format(ext: &str) -> bool {
         matches!(ext, "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v")
@@ -897,4 +919,10 @@ pub enum PlayerCommand {
     UpdateVideoProgress { position: u64, duration: u64 },
     TogglePlaybackMode, // 在音频模式和MV模式之间切换
     SetPlaybackMode(MediaType), // 直接设置播放模式（音频或视频）
+    // 新增：音视频互斥控制命令
+    ForceStopAudio,     // 强制停止音频播放
+    ForceStopVideo,     // 强制停止视频播放
+    ForceStopAll,       // 强制停止所有播放
+    ActivateAudioPlayer, // 激活音频播放器
+    ActivateVideoPlayer, // 激活视频播放器
 }
