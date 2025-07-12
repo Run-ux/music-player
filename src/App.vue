@@ -224,7 +224,7 @@ setTimeout(() => {
         <div class="project-title">
           <div class="title-main">Rust大作业</div>
           <div class="title-divider"></div>
-          <div class="title-sub">音乐播放器</div>
+          <div class="title-sub">骁天音乐播放器</div>
         </div>
         
         <!-- 加载指示器 -->
