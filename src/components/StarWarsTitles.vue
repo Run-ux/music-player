@@ -22,7 +22,7 @@
 
         <p style="color:#ff6; font-weight:bold; text-align:center; text-shadow:0 1px 8px #ff6,0 0 2px #fff;">在一个遥远的星系</p>
         <p style="color:#ff6; font-weight:bold; text-align:center; text-shadow:0 1px 8px #ff6,0 0 2px #fff;">邪恶的企鹅音乐垄断了市场</p>
-        <p style="color:#ff6; font-weight:bold; text-align:center; text-shadow:0 1px 8px #ff6,0 0 2px #fff;">它与网抑云，酷猫勾结</p>
+        <p style="color:#ff6; font-weight:bold; text-align:center; text-shadow:0 1px 8px #ff6,0 0 2px #fff;">它与网抑云，酷你勾结</p>
 
         <p style="color:#ff6; font-weight:bold; text-align:center; text-shadow:0 1px 8px #ff6,0 0 2px #fff;">导致大家听不了免费的歌</p>
 
